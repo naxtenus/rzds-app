@@ -74,7 +74,7 @@ function seed() {
     settings: {
       problem: true, answers: true, morning: true, weekly: true,
       taskDue: true, taskReply: true, taskUnread: true,
-      workerNew: true, workerReport: true, quiet: true, telegram: true,
+      workerNew: true, workerReport: true, quiet: false, telegram: true,
     },
     nextTask: 8,
   };
@@ -211,6 +211,7 @@ export const demo = {
         out = view(me); break;
       }
       case 'settingsSave': Object.assign(db.settings, p.settings || {}); out = view(me); break;
+      case 'issueCode': out = { code: 'DEMO' + Math.random().toString(36).slice(2, 4).toUpperCase(), name: p.name, until: new Date(Date.now() + 864e5).toISOString() }; break;
       case 'pushKey': out = { key: '' }; break;
       case 'pushSubscribe': out = { ok: true }; break;
       case 'reset': db = seed(); out = view(me); break;

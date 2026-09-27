@@ -62,7 +62,7 @@ export function render() {
         <span class="pill green" style="font-size:13px">${cur.status === 'план' ? 'Следующее' : 'Сейчас'}</span>
         <span class="small muted">${hhmm(cur.start)} – ${hhmm(cur.end)}${sameDay(cur.start, new Date()) ? '' : ' · ' + esc(dueText(cur.start, false))}</span>
       </div>
-      <div><div class="order-big">${esc(cur.order)}</div>
+      <div><div class="order-big" style="${cur.order.length > 8 ? 'font-size:26px' : cur.order.length > 6 ? 'font-size:32px' : ''}">${esc(cur.order)}</div>
         <div class="strong" style="margin-top:8px;font-size:17px">${esc(cur.op)}</div>
         <div class="small muted" style="margin-top:2px">${esc(cur.res)}</div></div>
       ${actions}

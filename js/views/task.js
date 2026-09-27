@@ -1,7 +1,7 @@
 /* Карточка задачи. Владельцу — всё: кому, срок, важность, путь доставки,
    переписка. Рабочему — его поручение: прочитать, взять, сделать, ответить. */
 
-import { esc, icon, hhmm, dueText, ago } from '../util.js';
+import { esc, icon, hhmm, dueText, ago, isOverdue } from '../util.js';
 import { weightLook, WEIGHTS, personName, deliveryState, avatar } from '../ui.js';
 import { store } from '../store.js';
 
@@ -32,7 +32,7 @@ export function render(params) {
   const moves = [['Сегодня 17:00', at(0, 17)], ['Завтра 12:00', at(1, 12)], ['Через 2 дня', at(2, 12)], ['Через неделю', at(7, 12)]];
 
   const comments = (t.comments || []).map((c) => {
-    const mine = worker ? c.who === store.me.name : (c.who === 'Вы' || c.who === (store.me && store.me.name));
+    const mine = worker ? c.who === store.me.name : !((d.people || []).some((p) => p.name === c.who));
     return `<div class="bubble${mine ? ' mine' : ''}"><div class="by">${esc(mine ? 'Вы' : c.who)} · ${hhmm(c.ts)}</div><div style="margin-top:2px">${esc(c.text)}</div></div>`;
   }).join('');
 
@@ -43,7 +43,7 @@ export function render(params) {
       ${store.ui.changeTo === n ? `<div class="chips" style="padding:12px 14px;background:var(--bg2)">
         ${[{ id: '', name: 'Мне' }].concat(d.people || []).map((p) => `<button class="chip${p.id === (t.to || '') ? ' on' : ''}" style="height:40px" data-act="set-to" data-n="${n}" data-v="${esc(p.id)}">${esc(p.name)}</button>`).join('')}
       </div>` : ''}
-      <div class="kv"><span class="k">Срок</span><span class="v" style="color:${!done && t.due && new Date(t.due) < new Date() ? '#B3261E' : 'inherit'}">${esc(dueText(t.due))}</span>
+      <div class="kv"><span class="k">Срок</span><span class="v" style="color:${!done && isOverdue(t.due) ? '#B3261E' : 'inherit'}">${esc(dueText(t.due))}</span>
         <button class="btn bronze" data-act="move" style="height:36px;padding:0 12px">Перенести</button></div>
       ${moving ? `<div class="chips" style="padding:12px 14px;background:var(--bg2)">
         ${moves.map(([l, v]) => `<button class="chip" style="height:40px" data-act="move-to" data-n="${n}" data-v="${v.toISOString()}">${l}</button>`).join('')}

@@ -30,6 +30,7 @@ export const opLook = {
   'проблема': { cls: 'problem', dot: '#C62828', text: 'Есть проблема', color: '#B3261E' },
   'ждёт решения': { cls: 'wait', dot: '#C98A2E', text: 'Ждёт решения', color: '#6E440F' },
   'выполнено': { cls: 'done', dot: '#9A9F98', text: 'Выполнено', color: '#5A5F58' },
+  'пауза': { cls: 'wait', dot: '#C98A2E', text: 'Приостановлено', color: '#6E440F' },
   'план': { cls: 'plan', dot: '#AF7C58', text: 'По плану', color: '#6B4528' },
 };
 export const opL = (o) => opLook[o.status] || opLook['план'];

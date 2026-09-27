@@ -1,11 +1,11 @@
 /* Задачи: себе и поручения другим. Одним списком, с фильтром
    «Все / Мне / Поручил». У поручения видно, дошло ли оно до человека. */
 
-import { esc, icon, startOfDay, isOverdue, plural } from '../util.js';
+import { esc, icon, startOfDay, isOverdue, plural, parseDue } from '../util.js';
 import { tabbar, checkBtn, weightPill, deliveryState, personName, avatar, dueHtml, WEIGHTS } from '../ui.js';
 import { store } from '../store.js';
 
-const byDue = (a, b) => (a.due ? new Date(a.due) : 8.64e15) - (b.due ? new Date(b.due) : 8.64e15)
+const byDue = (a, b) => (parseDue(a.due) || 8.64e15) - (parseDue(b.due) || 8.64e15)
   || WEIGHTS.indexOf(a.weight) - WEIGHTS.indexOf(b.weight);
 
 export function taskRow(d, t) {
@@ -37,8 +37,8 @@ export function render() {
   const groups = [];
   if (mode !== 'given') {
     const over = mine.filter((t) => isOverdue(t.due)).sort(byDue);
-    const todayL = mine.filter((t) => !isOverdue(t.due) && t.due && new Date(t.due) < tomorrow).sort(byDue);
-    const later = mine.filter((t) => !isOverdue(t.due) && (!t.due || new Date(t.due) >= tomorrow)).sort(byDue);
+    const todayL = mine.filter((t) => !isOverdue(t.due) && t.due && parseDue(t.due) < tomorrow).sort(byDue);
+    const later = mine.filter((t) => !isOverdue(t.due) && (!t.due || parseDue(t.due) >= tomorrow)).sort(byDue);
     if (over.length) groups.push({ title: 'Просрочено', color: '#B3261E', list: over });
     if (todayL.length) groups.push({ title: 'Мне · сегодня', color: '#1F6436', list: todayL });
     if (later.length) groups.push({ title: 'Мне · дальше', color: '#5A5F58', list: later });

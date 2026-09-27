@@ -13,12 +13,16 @@ export const kindPill = (r) => ({
   done: '<span class="pill green">Закончил</span>',
   comment: '<span class="pill gray">Комментарий</span>',
   start: '<span class="pill green">Начал</span>',
+  move: '<span class="pill bronze">Просит перенос</span>',
+  scrap: '<span class="pill red">Брак</span>',
 }[r.kind] || '');
 
 export const decisionButtons = (r) => {
-  if (r.kind === 'problem') return ['Сдвинуть план', 'Не сдвигать'];
+  if (r.kind === 'problem') return ['Отметить в плане', 'Не отмечать'];
   if (r.kind === 'late') return ['Принять сдвиг', 'Оставить план'];
-  if (r.kind === 'done') return ['Принять', 'Не принимать'];
+  if (r.kind === 'done' || r.kind === 'start') return ['Принять', 'Не принимать'];
+  if (r.kind === 'move') return ['Перенести', 'Не переносить'];
+  if (r.kind === 'scrap') return ['Записать', 'Не записывать'];
   return ['Прочитано', ''];
 };
 

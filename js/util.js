@@ -32,19 +32,34 @@ export const startOfDay = (d) => { d = new Date(d); d.setHours(0, 0, 0, 0); retu
 export const sameDay = (a, b) => startOfDay(a).getTime() === startOfDay(b).getTime();
 
 /* «сегодня 15:00», «завтра», «вчера», «ср, 30.09» — как говорят в цеху. */
+/* Срок из таблицы бывает днём без времени («2026-09-30») — это местная
+   дата, а не полночь по Гринвичу (иначе в Москве вышло бы «03:00»). */
+export const parseDue = (v) => {
+  if (!v) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  if (m) { const d = new Date(+m[1], m[2] - 1, +m[3]); d.dayOnly = true; return d; }
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+};
+
 export const dueText = (iso, withTime = true) => {
   if (!iso) return 'без срока';
-  const d = new Date(iso);
-  if (isNaN(d)) return String(iso);
+  const d = parseDue(iso);
+  if (!d) return String(iso);
   const days = Math.round((startOfDay(d) - startOfDay(new Date())) / 864e5);
-  const t = withTime && (d.getHours() || d.getMinutes()) ? ' ' + hhmm(d) : '';
+  const t = withTime && !d.dayOnly && (d.getHours() || d.getMinutes()) ? ' ' + hhmm(d) : '';
   if (days === 0) return (t ? 'до' + t : 'сегодня');
   if (days === 1) return 'завтра' + t;
   if (days === -1) return 'вчера' + t;
   return WD_SHORT[d.getDay()] + ', ' + pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + t;
 };
 
-export const isOverdue = (iso) => !!iso && new Date(iso) < new Date();
+export const isOverdue = (iso) => {
+  const d = parseDue(iso);
+  if (!d) return false;
+  if (d.dayOnly) { const end = new Date(d); end.setDate(end.getDate() + 1); return end <= new Date(); }
+  return d < new Date();
+};
 
 export const ago = (iso) => {
   const m = Math.round((Date.now() - new Date(iso)) / 6e4);
