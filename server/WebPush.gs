@@ -18,6 +18,10 @@
    ========================================================================= */
 
 var WP = (function () {
+  /* Числа BigInt — через BigInt('…'), а не литералом 123n: редактор Apps
+     Script понимает синтаксис уровня ES2019 и литерал с «n» не сохраняет
+     («Unexpected token ILLEGAL»), хотя сам движок BigInt умеет. */
+  var _0 = BigInt(0), _1 = BigInt(1), _2 = BigInt(2), _3 = BigInt(3), _4 = BigInt(4), _8 = BigInt(8), _255 = BigInt(255);
   /* ------------------------------------------------ байты и кодировки */
   function u8(a) { var r = []; for (var i = 0; i < a.length; i++) r.push(a[i] & 255); return r; }
   function s8(a) { return a.map(function (x) { return x > 127 ? x - 256 : x; }); }
@@ -40,52 +44,52 @@ var WP = (function () {
     }
     return out.slice(0, n);
   }
-  function toBig(bytes) { var x = 0n; for (var i = 0; i < bytes.length; i++) x = (x << 8n) | BigInt(bytes[i]); return x; }
-  function fromBig(x, len) { var r = []; for (var i = 0; i < len; i++) { r.unshift(Number(x & 255n)); x >>= 8n; } return r; }
+  function toBig(bytes) { var x = _0; for (var i = 0; i < bytes.length; i++) x = (x << _8) | BigInt(bytes[i]); return x; }
+  function fromBig(x, len) { var r = []; for (var i = 0; i < len; i++) { r.unshift(Number(x & _255)); x >>= _8; } return r; }
 
   /* --------------------------------------------------- кривая P-256 */
-  var P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
-  var N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
-  var A = P - 3n;
-  var B = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604bn;
-  var G = [0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n,
-           0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n];
-  function mod(a, m) { a %= m; return a < 0n ? a + m : a; }
+  var P = BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff');
+  var N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+  var A = P - _3;
+  var B = BigInt('0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b');
+  var G = [BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'),
+           BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5')];
+  function mod(a, m) { a %= m; return a < _0 ? a + m : a; }
   function inv(a, m) {
-    var lm = 1n, hm = 0n, low = mod(a, m), high = m;
-    while (low > 1n) { var r = high / low; var nm = hm - lm * r, nw = high - low * r; hm = lm; lm = nm; high = low; low = nw; }
+    var lm = _1, hm = _0, low = mod(a, m), high = m;
+    while (low > _1) { var r = high / low; var nm = hm - lm * r, nw = high - low * r; hm = lm; lm = nm; high = low; low = nw; }
     return mod(lm, m);
   }
   /* Якобиевы координаты: без деления на каждом шаге — в разы быстрее. */
   function jDouble(p) {
-    if (p[1] === 0n) return [0n, 0n, 0n];
+    if (p[1] === _0) return [_0, _0, _0];
     var X = p[0], Y = p[1], Z = p[2];
-    var ysq = mod(Y * Y, P), S = mod(4n * X * ysq, P);
-    var Z2 = mod(Z * Z, P), M = mod(3n * (X - Z2) * (X + Z2), P);
-    var nx = mod(M * M - 2n * S, P);
-    var ny = mod(M * (S - nx) - 8n * ysq * ysq, P);
-    return [nx, ny, mod(2n * Y * Z, P)];
+    var ysq = mod(Y * Y, P), S = mod(_4 * X * ysq, P);
+    var Z2 = mod(Z * Z, P), M = mod(_3 * (X - Z2) * (X + Z2), P);
+    var nx = mod(M * M - _2 * S, P);
+    var ny = mod(M * (S - nx) - _8 * ysq * ysq, P);
+    return [nx, ny, mod(_2 * Y * Z, P)];
   }
   function jAdd(p, q) {
-    if (p[2] === 0n) return q; if (q[2] === 0n) return p;
+    if (p[2] === _0) return q; if (q[2] === _0) return p;
     var Z1s = mod(p[2] * p[2], P), Z2s = mod(q[2] * q[2], P);
     var U1 = mod(p[0] * Z2s, P), U2 = mod(q[0] * Z1s, P);
     var S1 = mod(p[1] * Z2s * q[2], P), S2 = mod(q[1] * Z1s * p[2], P);
-    if (U1 === U2) return S1 === S2 ? jDouble(p) : [0n, 1n, 0n];
+    if (U1 === U2) return S1 === S2 ? jDouble(p) : [_0, _1, _0];
     var H = mod(U2 - U1, P), R = mod(S2 - S1, P);
     var H2 = mod(H * H, P), H3 = mod(H * H2, P), U1H2 = mod(U1 * H2, P);
-    var nx = mod(R * R - H3 - 2n * U1H2, P);
+    var nx = mod(R * R - H3 - _2 * U1H2, P);
     var ny = mod(R * (U1H2 - nx) - S1 * H3, P);
     return [nx, ny, mod(H * p[2] * q[2], P)];
   }
   function mul(pt, k) {
-    var R = [0n, 1n, 0n], Q = [pt[0], pt[1], 1n];
-    while (k > 0n) { if (k & 1n) R = jAdd(R, Q); Q = jDouble(Q); k >>= 1n; }
-    if (R[2] === 0n) throw new Error('точка на бесконечности');
+    var R = [_0, _1, _0], Q = [pt[0], pt[1], _1];
+    while (k > _0) { if (k & _1) R = jAdd(R, Q); Q = jDouble(Q); k >>= _1; }
+    if (R[2] === _0) throw new Error('точка на бесконечности');
     var zi = inv(R[2], P), zi2 = mod(zi * zi, P);
     return [mod(R[0] * zi2, P), mod(R[1] * zi2 * zi, P)];
   }
-  function onCurve(pt) { return mod(pt[1] * pt[1] - (pt[0] * pt[0] * pt[0] + A * pt[0] + B), P) === 0n; }
+  function onCurve(pt) { return mod(pt[1] * pt[1] - (pt[0] * pt[0] * pt[0] + A * pt[0] + B), P) === _0; }
   function pubBytes(pt) { return concat([4], fromBig(pt[0], 32), fromBig(pt[1], 32)); }
   function parsePub(bytes) {
     if (bytes.length !== 65 || bytes[0] !== 4) throw new Error('ключ подписки неверного вида');
@@ -95,7 +99,7 @@ var WP = (function () {
   }
   function newKey() {
     var d;
-    do { d = mod(toBig(random(32)), N); } while (d === 0n);
+    do { d = mod(toBig(random(32)), N); } while (d === _0);
     return { d: d, pub: pubBytes(mul(G, d)) };
   }
 
@@ -111,11 +115,11 @@ var WP = (function () {
     for (;;) {
       V = hmac(K, V);
       var k = toBig(V);
-      if (k > 0n && k < N) {
+      if (k > _0 && k < N) {
         var r = mod(mul(G, k)[0], N);
-        if (r !== 0n) {
+        if (r !== _0) {
           var s = mod(inv(k, N) * (e + r * d), N);
-          if (s !== 0n) return concat(fromBig(r, 32), fromBig(s, 32));
+          if (s !== _0) return concat(fromBig(r, 32), fromBig(s, 32));
         }
       }
       K = hmac(K, concat(V, [0])); V = hmac(K, V);
