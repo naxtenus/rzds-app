@@ -1,7 +1,7 @@
 /* Служебный работник приложения: хранит само приложение в телефоне (чтобы
    открывалось мгновенно и без связи) и принимает push-уведомления. */
 
-const VERSION = 'rzds-0.1.0';
+const VERSION = 'rzds-0.2.0';
 const SHELL = [
   './', 'index.html', 'app.css', 'config.js', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/mock.js', 'js/push.js', 'js/store.js', 'js/ui.js', 'js/util.js',
