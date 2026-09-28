@@ -1,7 +1,7 @@
 /* Служебный работник приложения: хранит само приложение в телефоне (чтобы
    открывалось мгновенно и без связи) и принимает push-уведомления. */
 
-const VERSION = 'rzds-0.2.0';
+const VERSION = 'rzds-0.2.1';
 const SHELL = [
   './', 'index.html', 'app.css', 'config.js', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/mock.js', 'js/push.js', 'js/store.js', 'js/ui.js', 'js/util.js',
@@ -26,13 +26,23 @@ self.addEventListener('activate', (e) => {
 
 /* Своё — из памяти телефона, с тихим обновлением в фоне. Чужие адреса
    (сервер Apps Script) не трогаем: данные должны быть живыми. */
+/* Код приложения — сначала из сети (чтобы после обновления сразу открывалась
+   новая версия), а без связи или при медленной сети (дольше 2,5 с) — из
+   памяти телефона. Шрифты и иконки не меняются — их сразу из памяти.
+   Чужие адреса (сервер Apps Script) не трогаем: данные должны быть живыми. */
+const STATIC = /\/(fonts|icons)\//;
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith(caches.open(VERSION).then(async (c) => {
     const hit = await c.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then((r) => { if (r.ok) c.put(e.request, r.clone()); return r; }).catch(() => null);
-    return hit || (await net) || c.match('index.html');
+    if (hit && STATIC.test(url.pathname)) return hit;
+    const net = fetch(e.request, { cache: 'no-cache' })
+      .then((r) => { if (r.ok) c.put(e.request, r.clone()); return r; })
+      .catch(() => null);
+    if (!hit) return (await net) || c.match('index.html');
+    const slow = new Promise((r) => setTimeout(() => r(null), 2500));
+    return (await Promise.race([net, slow])) || hit;
   }));
 });
 

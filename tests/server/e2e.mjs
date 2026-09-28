@@ -66,7 +66,7 @@ const srv = http.createServer((req, res) => {
   let f = path.join(APP, decodeURIComponent(u.pathname === "/" ? "/index.html" : u.pathname));
   if (!fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
   let data = fs.readFileSync(f);
-  if (f.endsWith("config.js")) data = Buffer.from(String(data).replace("server: ''", "server: 'http://127.0.0.1:8777/exec?app=1'"));
+  if (f.endsWith("config.js")) data = Buffer.from(String(data).replace(/server: '[^']*'/, "server: 'http://127.0.0.1:8777/exec?app=1'"));
   const type = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".woff2": "font/woff2" }[path.extname(f)] || "application/octet-stream";
   res.writeHead(200, { "Content-Type": type });
   res.end(data);

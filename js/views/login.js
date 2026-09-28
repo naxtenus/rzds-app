@@ -25,7 +25,7 @@ export function renderLogin() {
       <form data-form="login" style="display:flex;flex-direction:column;gap:12px">
         <label class="strong" for="code">Код входа</label>
         <input id="code" class="code-input" inputmode="text" autocomplete="one-time-code" autocapitalize="characters" maxlength="12" value="${esc(code)}" placeholder="••••••">
-        <div class="small muted">Код выдаёт владелец в планировщике: «+ Добавить» → «Вход в приложение». Вводится один раз на этом телефоне.</div>
+        <div class="small muted">Владелец берёт код в Google Таблице: меню «Планировщик» → «Вход в приложение на телефон». Рабочим коды выдаёт владелец в приложении. Код вводится один раз на этом телефоне.</div>
         <button class="btn primary tall" type="submit">Войти</button>
       </form>` : `
       <div class="info bronze">${icon.alert(20)}<span>Сервер ещё не подключён. Можно посмотреть приложение на демо-данных — в настоящий план ничего не попадёт.</span></div>`}
