@@ -1,11 +1,18 @@
 /* Новая задача — себе или кому-то из цеха. Всё выбирается нажатием:
-   кому, срок, важность, заказ. Печатать нужно только саму задачу. */
+   кому, срок, важность, заказ. Печатать нужно только саму задачу.
+
+   Волна 3 (30.09): можно написать всё одной строкой — «заказать электроды
+   завтра 15:00 слесарю срочно» — и кнопки ниже встанут сами (разбор в
+   js/parse.js, прямо в телефоне). Выбранное руками разбор не перебивает.
+   Ещё: повтор (каждый день, по будням, раз в неделю, раз в месяц) и
+   пункты — чек-лист внутри поручения. */
 
 import { esc, icon, initial } from '../util.js';
 import { weightLook, WEIGHTS } from '../ui.js';
 import { store } from '../store.js';
 import { calendar, calInit, calOn, calValue } from './calendar.js';
 import { pickPhoto, draftThumb } from '../photo.js';
+import { parseLine, repeatText, dueLabel } from '../parse.js';
 
 const nextMonday = () => { const d = new Date(); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); return d; };
 const pad = (n) => String(n).padStart(2, '0');
@@ -21,11 +28,43 @@ const DUES = () => {
     { k: 'mon', l: 'Пн, ' + pad(mon.getDate()) + '.' + pad(mon.getMonth() + 1), v: at(mon, 12) },
     { k: 'none', l: 'Без срока', v: null }, { k: 'pick', l: 'Другая дата', v: 'pick' }];
 };
+const dueOpts = (f) => (f.dueParsed ? [{ k: 'text', l: dueLabel(new Date(f.dueParsed)), v: new Date(f.dueParsed) }] : []).concat(DUES());
+
+const WDS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+const REPEATS = (f) => {
+  const base = f.due === 'text' && f.dueParsed ? new Date(f.dueParsed) : new Date();
+  const wd = (base.getDay() + 6) % 7 + 1;
+  const list = [['', 'Не повторять'], ['день', 'Каждый день'], ['будни', 'По будням'],
+    ['нед:' + wd, 'Каждый ' + WDS[wd - 1]], ['мес:' + base.getDate(), 'Каждое ' + base.getDate() + '-е']];
+  if (f.repeat && !list.some(([k]) => k === f.repeat)) list.splice(1, 0, [f.repeat, repeatText(f.repeat)]);
+  return list;
+};
+
+/* Разбор строки: что понято — ставится в кнопки, если человек не выбрал руками. */
+function applyParse(f, d) {
+  const r = parseLine(f.text, { people: d.people || [], orders: d.orders || [] });
+  const man = f.manual || (f.manual = {});
+  const auto = f.auto || (f.auto = {});
+  const setIf = (k, has, val, def) => {
+    if (man[k]) return;
+    if (has) { f[k] = val; auto[k] = true; } else if (auto[k]) { f[k] = def; auto[k] = false; }
+  };
+  setIf('to', r.to !== undefined, r.to, '');
+  setIf('weight', !!r.weight, r.weight, 'обычная');
+  setIf('order', !!r.order, r.order, '');
+  setIf('repeat', !!r.repeat, r.repeat, '');
+  if (!man.due) {
+    if (r.due) { f.dueParsed = r.due.toISOString(); f.due = 'text'; auto.due = true; }
+    else if (auto.due) { f.dueParsed = null; f.due = 'today'; auto.due = false; }
+  }
+  f.parsed = r.found.length ? r : null;
+}
 
 const draft = () => {
   if (!store.ui.draft) {
     const q = new URLSearchParams((location.hash.split('?')[1]) || '');
-    store.ui.draft = { text: '', to: q.get('to') || '', due: 'today', cal: null, weight: 'обычная', order: q.get('order') || '' };
+    store.ui.draft = { text: q.get('text') || '', to: q.get('to') || '', due: 'today', cal: null, weight: 'обычная', order: q.get('order') || '',
+      repeat: '', items: [], manual: q.get('order') ? { order: true } : {} };
   }
   return store.ui.draft;
 };
@@ -45,8 +84,12 @@ export function render() {
     </div>
     <label class="field">
       <span>Что сделать</span>
-      <textarea rows="2" data-bind="text" placeholder="Например: подготовить заготовки для ФДЗ" autocomplete="off">${esc(f.text)}</textarea>
+      <textarea rows="2" data-bind="text" id="nt-text" placeholder="Например: заказать электроды завтра 15:00 слесарю срочно" autocomplete="off">${esc(f.text)}</textarea>
     </label>
+    ${f.parsed ? `<div class="parsed" aria-live="polite">${icon.check(16)}<span>Понял: <b>«${esc(f.parsed.text || '…')}»</b>${
+      [f.parsed.to !== undefined ? (f.parsed.to ? esc(person.name) : 'себе') : '', f.parsed.due ? esc(dueLabel(f.parsed.due)) : '',
+        f.parsed.weight || '', f.parsed.order ? 'заказ ' + esc(f.parsed.order) : '', f.parsed.repeat ? esc(repeatText(f.parsed.repeat)) : '']
+        .filter(Boolean).map((x) => ' · ' + x).join('')}</span></div>` : ''}
 
     <section style="display:flex;flex-direction:column;gap:8px">
       <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Кому</h2>
@@ -56,7 +99,7 @@ export function render() {
 
     <section style="display:flex;flex-direction:column;gap:8px">
       <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Срок</h2>
-      <div class="chips">${DUES().map((o) => `<button class="chip${o.k === f.due ? ' on' : ''}" data-act="set" data-k="due" data-v="${o.k}" aria-pressed="${o.k === f.due}">${o.k === 'pick' ? '' : ''}${o.l}</button>`).join('')}</div>
+      <div class="chips">${dueOpts(f).map((o) => `<button class="chip${o.k === f.due ? ' on' : ''}" data-act="set" data-k="due" data-v="${o.k}" aria-pressed="${o.k === f.due}">${o.k === 'pick' ? '' : ''}${o.l}</button>`).join('')}</div>
       ${f.due === 'pick' ? calendar(f.cal || (f.cal = calInit())) : ''}
     </section>
 
@@ -72,6 +115,23 @@ export function render() {
     <section style="display:flex;flex-direction:column;gap:8px">
       <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">К заказу</h2>
       <div class="chips">${[{ code: '' }].concat(d.orders || []).map((o) => `<button class="chip${o.code === f.order ? ' on' : ''}" style="height:40px" data-act="set" data-k="order" data-v="${esc(o.code)}" aria-pressed="${o.code === f.order}">${o.code ? esc(o.code) : 'Без заказа'}</button>`).join('')}</div>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:8px">
+      <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Повторять</h2>
+      <div class="chips">${REPEATS(f).map(([k, l]) => `<button class="chip${k === (f.repeat || '') ? ' on' : ''}" style="height:40px" data-act="set" data-k="repeat" data-v="${esc(k)}" aria-pressed="${k === (f.repeat || '')}">${esc(l)}</button>`).join('')}</div>
+      ${f.repeat ? '<div class="small muted">Выполнили — следующая заведётся сама, с тем же текстом и исполнителем.</div>' : ''}
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:8px">
+      <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Пункты${isMe ? '' : ' — исполнитель отметит каждый'}</h2>
+      ${(f.items || []).length ? `<div class="list">${f.items.map((t, i) => `<div class="kv"><span class="check"><i></i></span><span class="v" style="flex:1">${esc(t)}</span>
+        <button class="icon-btn" data-act="it-del" data-i="${i}" aria-label="Убрать пункт" style="width:36px;height:36px">${icon.close(16)}</button></div>`).join('')}</div>` : ''}
+      <div class="input-row">
+        <label class="sr" for="it-new">Новый пункт</label>
+        <input id="it-new" type="text" placeholder="Добавить пункт" enterkeyhint="done" autocomplete="off">
+        <button class="icon-btn green" data-act="it-add" aria-label="Добавить пункт">${icon.plus(18)}</button>
+      </div>
     </section>
 
     <section style="display:flex;flex-direction:column;gap:8px">
@@ -92,9 +152,19 @@ export function render() {
 export const on = {
   'nt-photo': async () => { const p = await pickPhoto(); if (p) { draft().photo = p; store.emit(); } },
   'ph-drop': () => { draft().photo = null; store.emit(); },
+  'it-add': () => {
+    const inp = document.querySelector('#it-new');
+    const t = (inp && inp.value || '').trim();
+    if (!t) { inp && inp.focus(); return; }
+    (draft().items || (draft().items = [])).push(t);
+    store.emit();
+    setTimeout(() => document.querySelector('#it-new')?.focus(), 30);
+  },
+  'it-del': (el) => { draft().items.splice(Number(el.dataset.i), 1); store.emit(); },
   'set': (el) => {
     const f = draft();
     f[el.dataset.k] = el.dataset.v;
+    (f.manual || (f.manual = {}))[el.dataset.k] = true;
     if (el.dataset.k === 'due' && el.dataset.v === 'pick' && !f.cal) f.cal = calInit();
     store.emit();
     if (el.dataset.k === 'due' && el.dataset.v === 'pick') {
@@ -112,9 +182,9 @@ export const on = {
      сервер отказал — возвращаемся в форму, всё набранное на месте. */
   'save': () => {
     const f = draft();
-    const text = (f.text || '').trim();
+    const text = ((f.parsed && f.parsed.text) || f.text || '').trim();
     if (!text) { store.say('Напишите, что сделать', 'error'); document.querySelector('[data-bind="text"]')?.focus(); return; }
-    const opt = DUES().find((o) => o.k === f.due);
+    const opt = dueOpts(f).find((o) => o.k === f.due);
     let due = opt && opt.v && opt.v !== 'pick' ? opt.v.toISOString() : '';
     if (f.due === 'pick') {
       const v = calValue(f.cal);
@@ -122,6 +192,8 @@ export const on = {
       due = v.toISOString();
     }
     const task = { text, to: f.to, due, weight: f.weight, order: f.order };
+    if (f.repeat) task.repeat = f.repeat;
+    if ((f.items || []).length) task.items = f.items.slice();
     if (f.photo) task.photo = f.photo;
     const tmp = -Date.now();
     const kept = JSON.parse(JSON.stringify(f));
@@ -132,6 +204,7 @@ export const on = {
       const now = new Date().toISOString();
       const t = Object.assign({ n: tmp, state: 'открыта', comments: [], saving: true, delivery: task.to ? { sent: now } : undefined }, task);
       delete t.photo;
+      t.items = (task.items || []).map((x) => ({ t: x, d: false }));
       d.tasks.push(t);
     }, task.to ? 'Поручено — уведомление ушло ✓' : 'Задача поставлена ✓').then((res) => {
       if (!res) { store.ui.draft = kept; location.hash = '#/new'; }
@@ -140,3 +213,18 @@ export const on = {
     });
   },
 };
+
+export function mount(root) {
+  const ta = root.querySelector('#nt-text');
+  if (ta) ta.addEventListener('input', () => {
+    const f = draft();
+    f.text = ta.value;
+    applyParse(f, store.data || {});
+    clearTimeout(ta._t);
+    ta._t = setTimeout(() => store.emit(), 120);
+  });
+  const it = root.querySelector('#it-new');
+  if (it) it.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); on['it-add'](); } };
+  const f = draft();
+  if (f.text && !f.parsedOnce) { f.parsedOnce = true; applyParse(f, store.data || {}); if (f.parsed) setTimeout(() => store.emit(), 0); }
+}

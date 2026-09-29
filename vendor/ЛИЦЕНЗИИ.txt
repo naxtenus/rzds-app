@@ -1,0 +1,3 @@
+qrcode.js — QR Code Generator for JavaScript, (c) 2009 Kazuhiko Arase, лицензия MIT. npm qrcode-generator 2.0.4.
+jsQR.js — jsQR 1.4.0, (c) Cosmo Wolfe, лицензия Apache-2.0. npm jsqr 1.4.0.
+Лежат в приложении, а не грузятся с чужого сервера: сканер и маршрутный лист работают и без связи.

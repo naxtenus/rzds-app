@@ -376,3 +376,7 @@ button.kv { font: inherit; color: inherit; cursor: pointer; }
 .sheet.mv { max-height: 72vh; overflow: auto; }
 .sheet .late { color: var(--red-d); font-weight: 700; }
 .mv-list .kv { gap: 8px; }
+
+/* ------------------------------------------------------------ волна 3 */
+.parsed { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; background: var(--green-l); color: var(--green-d); font-size: 14px; line-height: 1.35; margin-top: -6px; }
+.parsed svg { flex-shrink: 0; margin-top: 2px; }

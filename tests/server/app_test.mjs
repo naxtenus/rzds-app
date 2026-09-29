@@ -629,5 +629,63 @@ check("сдвиг этапа: предпросмотр ничего не пиш�
   return `сдвинулось этапов: ${p.changed.length}, заказов затронуто: ${p.orders.length}`;
 });
 
+console.log("\n9. Волна 3: задачи и заказ");
+check("чек-лист в поручении: исполнитель отмечает, владелец видит", () => {
+  const v = post({ a: "taskSave", s: OWN, task: { text: "Наладка под ФДЗ", to: "Слесарь", items: ["Проверить оснастку", "Замерить вылет", " "] } });
+  const n = v.created;
+  let t = v.tasks.find((x) => x.n === n);
+  eq(t.items.length, 2, "пунктов"); eq(t.items[0].d, false, "сразу отмечен");
+  post({ a: "taskCheck", s: WRK, n, i: 1, done: true });
+  t = post({ a: "load", s: OWN }).tasks.find((x) => x.n === n);
+  eq(t.items[1].d, true, "отметка"); eq(t.items[1].by, "Слесарь", "кто");
+  truthy(post({ a: "taskCheck", s: WRK2 || OWN, n, i: 5, done: true }).error, "несуществующий пункт");
+  post({ a: "taskUpdate", s: OWN, n, items: ["Замерить вылет", "Новый пункт"] });
+  t = post({ a: "load", s: OWN }).tasks.find((x) => x.n === n);
+  eq(t.items.map((x) => x.t + (x.d ? "+" : "")).join("|"), "Замерить вылет+|Новый пункт", "правка пунктов сохранила отметку");
+});
+check("повторяющаяся задача: выполнил — завелась следующая по правилу, правило переехало", () => {
+  const v = post({ a: "taskSave", s: OWN, task: { text: "Заточка", to: "Слесарь", repeat: "нед:1", due: "2026-09-28" } });
+  const n = v.created;
+  eq(v.tasks.find((x) => x.n === n).repeat, "нед:1", "правило");
+  const w = post({ a: "taskUpdate", s: WRK, n, state: "закрыта" });
+  const next = w.tasks.find((x) => x.text === "Заточка" && x.n !== n && x.state === "открыта");
+  truthy(next, "следующая не завелась");
+  eq(new Date(next.due + "T12:00").getDay(), 1, "следующая не в понедельник: " + next.due);
+  truthy(new Date(next.due + "T12:00") > new Date(), "следующая в прошлом: " + next.due);
+  eq(next.repeat, "нед:1", "правило у новой");
+  eq(post({ a: "load", s: OWN }).tasks.find((x) => x.n === n).repeat, "", "правило осталось у старой");
+  truthy(post({ a: "taskSave", s: OWN, task: { text: "x", repeat: "каждый вторник" } }).error, "кривое правило принято");
+});
+check("повтор, закрытый в планировщике, догоняют часы", () => {
+  const v = post({ a: "taskSave", s: OWN, task: { text: "Уборка", repeat: "день" } });
+  const n = v.created;
+  run(`Прил_состояние_ = Прил_состояние_; (function(){ var l = задачи_(true,true); l.filter(function(x){return x.n===${n}})[0].state = ЗАДАЧА_ЗАКР; записатьЗадачи_(l); })()`);
+  eq(j("Прил_повторыДогнать_()"), 1, "догнано");
+  eq(j("Прил_повторыДогнать_()"), 0, "второй раз");
+  truthy(post({ a: "load", s: OWN }).tasks.some((x) => x.text === "Уборка" && x.n !== n && x.repeat === "день"), "нет новой");
+});
+check("переписка по заказу: рабочий и владелец пишут, чужой заказ — нельзя", () => {
+  const w = post({ a: "load", s: WRK });
+  const ord = w.ops[0].order;
+  pushes.length = 0;
+  let r = post({ a: "orderSay", s: WRK, order: ord, text: "Заготовка короче на 2 мм" });
+  truthy(!r.error, r.error);
+  eq(r.chat.pop().text, "Заготовка короче на 2 мм", "сообщение");
+  r = post({ a: "orderSay", s: OWN, order: ord, text: "Бери запасную" });
+  eq(r.chat.length, 2, "в переписке");
+  eq(post({ a: "orderInfo", s: WRK, order: ord }).chat.length, 2, "видно на экране заказа");
+  const чужой = post({ a: "load", s: OWN }).ops.find((o) => o.res !== M && !w.ops.some((x) => x.order === o.order));
+  if (чужой) truthy(/не на вашем участке/.test(post({ a: "orderSay", s: WRK, order: чужой.order, text: "x" }).error), "написал в чужой");
+  post({ a: "flush", s: OWN });
+  truthy(topics().some((t) => t.startsWith("own:chat-")) && topics().some((t) => t.startsWith("wrk2:chat-")), "уведомления: " + topics().join(" "));
+});
+check("после отметки со смены задачи заново не читаются (кэш по частям)", () => {
+  post({ a: "load", s: WRK });
+  const r = post({ a: "mark", s: WRK, op: WOP, what: "comment", text: "кэш" });
+  truthy(r.tm && r.tm["лист факт"] !== undefined, "факт не перечитан: " + JSON.stringify(r.tm));
+  truthy(r.tm["лист задачи"] === undefined, "задачи перечитаны: " + JSON.stringify(r.tm));
+});
+check("прогрев: ping отвечает без входа", () => { eq(post({ a: "ping" }).ok, true, "ping"); });
+
 console.log(`\nИтого: ${ok} прошло, ${bad} упало`);
 process.exit(bad ? 1 : 0);
