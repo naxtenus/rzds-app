@@ -20,7 +20,7 @@ const KEY = 'rzds-outbox';
 /* Что можно отложить. Вход, выдача кодов, подписка на уведомления —
    нельзя: их результат нужен сразу, на экране. */
 export const QUEUEABLE = new Set(['mark', 'taskSave', 'taskUpdate', 'taskComment', 'taskRead',
-  'decide', 'undecide', 'settingsSave', 'checklistSave']);
+  'decide', 'undecide', 'settingsSave', 'checklistSave', 'taskCheck', 'orderSay']);
 
 export const outbox = {
   list() { try { return JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) { return []; } },
@@ -48,8 +48,12 @@ export function describe(action, payload) {
       if (p.taken) return 'Поручение №' + p.n + ' — взял в работу';
       if (p.due !== undefined) return 'Задача №' + p.n + ' — новый срок';
       if (p.to !== undefined) return 'Задача №' + p.n + ' — другой исполнитель';
+      if (p.items !== undefined) return 'Задача №' + p.n + ' — пункты';
+      if (p.repeat !== undefined) return 'Задача №' + p.n + ' — повтор';
       return 'Задача №' + p.n + ' — правка';
     case 'taskComment': return 'Комментарий к №' + p.n + ': «' + (p.text || '') + '»';
+    case 'taskCheck': return 'Пункт в №' + p.n + (p.done ? ' — отмечен' : ' — снят');
+    case 'orderSay': return 'Заказ ' + (p.order || '') + ': «' + (p.text || 'фото') + '»';
     case 'taskRead': return 'Прочитал поручение №' + p.n;
     case 'decide': return (p.yes ? 'Принять' : 'Отклонить') + ' ответ со смены';
     case 'undecide': return 'Вернуть ответ на решение';

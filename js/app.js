@@ -19,12 +19,13 @@ import * as sessions from './views/sessions.js';
 import * as order from './views/order.js';
 import * as search from './views/search.js';
 import * as checklists from './views/checklists.js';
+import * as qr from './views/qr.js';
 import { viewer } from './photo.js';
 
 const root = document.getElementById('app');
 
-const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, order, search, checklists, install: { render: login.renderInstall, on: login.on } };
-const WORKER = { shift, task, notify, sessions, order, install: { render: login.renderInstall, on: login.on } };
+const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, order, search, checklists, route: qr.route, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
+const WORKER = { shift, task, notify, sessions, order, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
 
 function route() {
   const h = (location.hash || '#/').slice(2).split('?')[0];
@@ -74,6 +75,7 @@ function render() {
   }
   if (r.view.mount) r.view.mount(root, r.params);
   applyBusy();
+  if (reloadWanted && !reloadTimer) reloadTimer = setTimeout(() => { reloadTimer = 0; if (reloadWanted) reloadIfIdle(); }, 1500);
   const pending = (store.data && store.data.pending) || [];
   setBadge(store.me && store.me.role === 'owner' ? pending.length : 0);
 }
@@ -151,7 +153,9 @@ window.addEventListener('hashchange', () => {
   /* Уходя с экрана новой задачи без сохранения, черновик не храним. */
   if (!location.hash.startsWith('#/new')) store.ui.draft = null;
   if (!location.hash.startsWith('#/plan')) { store.ui.planSel = null; store.ui.planScroll = null; }
+  if (!location.hash.startsWith('#/scan')) { store.ui.scanMsg = ''; store.ui.scanErr = false; }
   render();
+  if (reloadWanted) reloadIfIdle();
 });
 store.sub(render);
 
@@ -164,9 +168,35 @@ setInterval(() => { if (!document.hidden && session.get()) store.refresh(true); 
 setInterval(() => { if (!document.hidden && session.get() && /^#\/(shift|today)?$|^$/.test(location.hash) && !document.activeElement?.matches('textarea,input')) render(); }, 30000);
 window.addEventListener('online', () => { if (session.get()) store.refresh(true); });
 
+/* Новая версия приложения. Код лежит в телефоне и открывается сразу, без
+   сети; телефон сам проверяет, не вышло ли обновление, и скачивает его в
+   фоне. Как скачал — перезапускаемся, но только когда человек ничего не
+   набирает и не заполняет: иначе — при следующем сворачивании. */
+let reloadWanted = false, reloadTimer = 0;
+const hadController = 'serviceWorker' in navigator && !!navigator.serviceWorker.controller;
+function reloadIfIdle() {
+  const a = document.activeElement;
+  const typing = a && a.matches && a.matches('input,textarea') && a.value;
+  const busyForm = location.hash.startsWith('#/new') || location.hash.startsWith('#/scan') || store.ui.shiftForm || store.ui.moveCal || store.sending || store.inflight;
+  if (!busyForm && (document.hidden || !typing)) { reloadWanted = false; location.reload(); }
+}
+let lastCheck = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (reloadWanted) { reloadIfIdle(); return; }
+  if (!document.hidden && Date.now() - lastCheck > 60000 && navigator.serviceWorker) {
+    lastCheck = Date.now();
+    navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+  }
+});
+
 /* Нажатие на уведомление, когда приложение уже открыто. */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return;         // первая установка — перезапуск не нужен
+    reloadWanted = true;
+    reloadIfIdle();
+  });
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data && e.data.type === 'open' && e.data.url) { location.hash = e.data.url.replace(/^.*#/, '#'); store.refresh(true); }
     if (e.data && e.data.type === 'push') store.refresh(true);

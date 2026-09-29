@@ -195,6 +195,43 @@ if (blk) {
   await expect(Number(run("planVersion_()")) === v0 + 1, "перенос записан в план");
 } else await expect(false, "в плане нет этапа, который можно двигать");
 
+/* Волна 3: строка, пункты, переписка по заказу, QR */
+await go("#/new");
+await page.type('[data-bind="text"]', "Проверить оснастку завтра 10:00 слесарю срочно");
+await sleep(400);
+await expect((await txt()).includes("Понял") && (await page.$eval('[data-act="set"][data-k="to"][data-v="Слесарь"]', (b) => b.classList.contains("on"))), "строка разобрана: кому — Слесарь");
+await page.type("#it-new", "Замерить вылет"); await page.click('[data-act="it-add"]'); await sleep(200);
+await page.evaluate(() => document.querySelector('[data-act="save"]').click());
+await sleep(2000);
+const n3 = JSON.parse(run("JSON.stringify(задачи_(false).filter(function(t){return t.text==='Проверить оснастку'}).map(function(t){return t.n})[0] || 0)"));
+const due3 = JSON.parse(run(`JSON.stringify(задачи_(false).filter(function(t){return t.n===${n3}})[0])`));
+await expect(n3 > 0 && due3.weight === "срочно", "задача одной строкой записана: №" + n3 + ", " + due3.weight + ", срок " + due3.due);
+await wp.evaluate((n) => { location.hash = "#/task/" + n; }, n3); await sleep(2500);
+await wp.evaluate(() => location.reload()); await sleep(2500);
+await wp.evaluate((n) => { location.hash = "#/task/" + n; }, n3); await sleep(800);
+const chk = await wp.$('[data-act="it-check"][data-i="0"]');
+if (chk) { await chk.click(); await sleep(2000); }
+const items3 = JSON.parse(run(`JSON.stringify(Прил_поручения_()[${n3}].items)`));
+await expect(!!chk && items3[0] && items3[0].d === true && items3[0].by === "Слесарь", "рабочий отметил пункт — записано в таблицу");
+const ordHref = await wp.evaluate(() => { location.hash = "#/shift"; return new Promise((r) => setTimeout(() => r((document.querySelector('a[href^="#/order/"]') || {}).getAttribute?.("href") || ""), 600)); });
+const ord3 = decodeURIComponent(ordHref.split("/")[2] || "");
+await wp.evaluate((h) => { location.hash = h; }, ordHref); await sleep(2500);
+await wp.type("#cmt", "Заготовка короче на 2 мм");
+await wp.click('[data-act="ch-send"]'); await sleep(2500);
+const chat3 = JSON.parse(run(`JSON.stringify(Прил_заказЧат_(${JSON.stringify(ord3)}))`));
+await expect(ord3 && chat3.length === 1 && chat3[0].who === "Слесарь" && (await wt()).includes("Заготовка короче"), "рабочий написал по заказу " + ord3);
+await wp.screenshot({ path: `${OUT}/e12-worker-order-chat.png` });
+await go("#/order/" + encodeURIComponent(ord3)); await sleep(2500);
+await expect((await txt()).includes("Заготовка короче") && !!(await page.$(".to-task")), "владелец видит сообщение и «В задачу»");
+await go("#/route/" + encodeURIComponent(ord3)); await sleep(1500);
+const qrN = (await page.$$(".route-op svg")).length;
+await expect(qrN > 0 && qrN === (await page.$$(".route-op")).length, "маршрутный лист: QR у каждой операции (" + qrN + ")");
+await shot("e13-route-sheet");
+const opCode3 = await page.evaluate((m) => { const x = [...document.querySelectorAll(".route-op")].find((e) => e.textContent.includes(m)) || document.querySelector(".route-op"); return x.querySelector(".num").textContent.split(" · ")[1]; }, M);
+await wp.evaluate((c) => { location.hash = "#/op/" + encodeURIComponent(c); }, opCode3); await sleep(1200);
+await expect((await wt()).includes("По QR-коду"), "QR-ссылка у рабочего открывает операцию " + opCode3);
+await wp.screenshot({ path: `${OUT}/e14-worker-qr-op.png` });
+
 /* «Мои входы» */
 await go("#/sessions");
 await sleep(1200);

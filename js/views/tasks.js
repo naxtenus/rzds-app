@@ -2,7 +2,7 @@
    «Все / Мне / Поручил». У поручения видно, дошло ли оно до человека. */
 
 import { esc, icon, startOfDay, isOverdue, plural, parseDue } from '../util.js';
-import { tabbar, checkBtn, weightPill, deliveryState, personName, avatar, dueHtml, WEIGHTS } from '../ui.js';
+import { tabbar, checkBtn, weightPill, deliveryState, personName, avatar, dueHtml, WEIGHTS, taskExtras } from '../ui.js';
 import { store } from '../store.js';
 
 const byDue = (a, b) => (parseDue(a.due) || 8.64e15) - (parseDue(b.due) || 8.64e15)
@@ -28,6 +28,7 @@ export function taskRow(d, t) {
           <span style="color:${del.color};font-weight:600">${del.text}</span>` : ''}
         ${dueHtml(t)}
         ${weightPill(t.weight)}
+        ${taskExtras(t)}
         ${n ? `<span class="muted" style="display:inline-flex;align-items:center;gap:4px">${icon.chat(14)}${n}</span>` : ''}
       </span>
     </a>

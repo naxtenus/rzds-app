@@ -380,3 +380,23 @@ button.kv { font: inherit; color: inherit; cursor: pointer; }
 /* ------------------------------------------------------------ волна 3 */
 .parsed { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; background: var(--green-l); color: var(--green-d); font-size: 14px; line-height: 1.35; margin-top: -6px; }
 .parsed svg { flex-shrink: 0; margin-top: 2px; }
+
+/* Волна 3: переписка по заказу, «сделать задачей», маршрутный лист, сканер */
+.to-task { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 6px 0 0; color: var(--green-d); text-decoration: none; font-weight: 600; }
+.bubble.mine .to-task { color: #fff; }
+.bubble.queued { opacity: .75; }
+.route-sheet { display: flex; flex-direction: column; gap: 12px; }
+.route-op { display: flex; gap: 14px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); break-inside: avoid; page-break-inside: avoid; }
+.route-op .qr { width: 112px; height: 112px; flex-shrink: 0; background: #fff; display: flex; align-items: center; justify-content: center; }
+.route-op .qr svg, .route-op .qr img { width: 112px; height: 112px; display: block; }
+.route-op .num { font-size: 13px; font-weight: 700; color: var(--bronze-d); }
+.scan-box { position: relative; border-radius: 22px; overflow: hidden; background: #111; aspect-ratio: 3 / 4; width: 100%; }
+.scan-box video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-box .frame { position: absolute; inset: 18%; border: 3px solid rgba(255,255,255,.85); border-radius: 18px; box-shadow: 0 0 0 999px rgba(0,0,0,.35); }
+.op-focus { outline: 3px solid var(--bronze); outline-offset: 2px; }
+@media print {
+  body { background: #fff !important; }
+  .topbar, .no-print, .tabbar, .cta, .outbox-chip, .toast, .demo-flag { display: none !important; }
+  .screen { padding: 0 !important; max-width: none !important; }
+  .route-op { border-color: #999; }
+}

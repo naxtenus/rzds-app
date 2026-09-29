@@ -6,6 +6,53 @@ import { weightLook, WEIGHTS, personName, deliveryState, avatar } from '../ui.js
 import { store } from '../store.js';
 import { calendar, calInit, calOn, calValue, calSummary } from './calendar.js';
 import { pickPhoto, thumbs, draftThumb } from '../photo.js';
+import { repeatText } from '../parse.js';
+
+const WDS = ['понедельник', 'вторник', 'среду', 'четверг', 'пятницу', 'субботу', 'воскресенье'];
+/* Варианты повтора — от срока задачи: «каждый <день недели срока>», «каждое <число срока>». */
+const repeatOpts = (t) => {
+  const base = t.due && !isNaN(new Date(t.due)) ? new Date(t.due) : new Date();
+  const wd = (base.getDay() + 6) % 7 + 1;
+  const list = [['', 'Не повторять'], ['день', 'Каждый день'], ['будни', 'По будням'],
+    ['нед:' + wd, 'Каждый ' + WDS[wd - 1]], ['мес:' + base.getDate(), 'Каждое ' + base.getDate() + '-е']];
+  if (t.repeat && !list.some(([k]) => k === t.repeat)) list.splice(1, 0, [t.repeat, repeatText(t.repeat)]);
+  return list;
+};
+
+/* Пункты поручения: отмечает исполнитель (и владелец), правит — владелец. */
+function itemsBlock(t, worker) {
+  const items = t.items || [];
+  const editing = !worker && store.ui.itemsEdit === t.n;
+  if (!items.length && worker) return '';
+  const doneN = items.filter((x) => x.d).length;
+  const me = store.me && store.me.name;
+  return `<section style="display:flex;flex-direction:column;gap:8px" aria-label="Пункты">
+    <div class="row-between"><h2 class="section-title">Пункты${items.length ? ' · ' + doneN + ' из ' + items.length : ''}</h2>
+      ${worker ? '' : `<button class="link-btn" data-act="it-edit" style="padding:0 4px">${editing ? 'Готово' : items.length ? 'Изменить' : 'Добавить'}</button>`}</div>
+    ${items.length ? `<div class="list">${items.map((x, i) => editing
+      ? `<div class="kv"><span class="v" style="flex:1">${esc(x.t)}</span>
+          <button class="icon-btn" data-act="it-drop" data-n="${t.n}" data-i="${i}" aria-label="Убрать пункт" style="width:36px;height:36px">${icon.close(16)}</button></div>`
+      : `<button class="check-row${x.d ? ' on' : ''}" data-act="it-check" data-n="${t.n}" data-i="${i}" aria-pressed="${x.d}">
+          <span class="check${x.d ? ' done' : ''}"><i>${x.d ? icon.check(14) : ''}</i></span>
+          <span style="flex:1;${x.d ? 'text-decoration:line-through;color:#5A5F58' : ''}">${esc(x.t)}</span>
+          ${x.d && x.at ? `<span class="small muted">${esc(x.by && x.by !== me ? x.by + ' · ' : '')}${hhmm(x.at)}</span>` : ''}</button>`).join('')}</div>`
+      : (editing ? '' : '<div class="small muted" style="padding:0 4px">Разбейте дело на шаги — исполнитель отметит каждый, вы увидите, где он.</div>')}
+    ${editing ? `<div class="input-row">
+      <label class="sr" for="it-new">Новый пункт</label>
+      <input id="it-new" type="text" placeholder="Добавить пункт" enterkeyhint="done" autocomplete="off">
+      <button class="icon-btn green" data-act="it-plus" data-n="${t.n}" aria-label="Добавить пункт">${icon.plus(18)}</button></div>` : ''}
+  </section>`;
+}
+
+function repeatRow(t, worker) {
+  if (worker) return t.repeat ? `<div class="kv"><span class="k">Повтор</span><span class="v">${esc(repeatText(t.repeat))}</span></div>` : '';
+  const open = store.ui.repeatEdit === t.n;
+  return `<div class="kv"><span class="k">Повтор</span><span class="v">${t.repeat ? '🔁 ' + esc(repeatText(t.repeat)) : '<span class="muted">нет</span>'}</span>
+      <button class="btn ghost" data-act="rep-toggle" style="height:36px;padding:0 6px">${t.repeat ? 'Сменить' : 'Задать'}</button></div>
+    ${open ? `<div class="chips" style="padding:12px 14px;background:var(--bg2)">
+      ${repeatOpts(t).map(([k, l]) => `<button class="chip${k === (t.repeat || '') ? ' on' : ''}" style="height:40px" data-act="rep-set" data-n="${t.n}" data-v="${esc(k)}">${esc(l)}</button>`).join('')}
+    </div>` : ''}`;
+}
 
 const pad = (n) => String(n).padStart(2, '0');
 const at = (off, h) => { const d = new Date(); d.setDate(d.getDate() + off); d.setHours(h, 0, 0, 0); return d; };
@@ -56,18 +103,20 @@ export function render(params) {
         ${calendar(store.ui.moveCal, 'mcal')}
         <button class="btn primary" data-act="move-cal-ok" data-n="${n}">Перенести на ${esc(calSummary(store.ui.moveCal).toLowerCase())}</button>
       </div>` : ''}` : ''}
-      ${t.order ? `<div class="kv"><span class="k">Заказ</span><span class="v"><span class="pill green" style="font-size:14px">${esc(t.order)}</span></span></div>` : ''}
+      ${t.order ? `<a class="kv" href="#/order/${encodeURIComponent(t.order)}" style="text-decoration:none;color:inherit"><span class="k">Заказ</span><span class="v"><span class="pill green" style="font-size:14px">${esc(t.order)}</span></span>${icon.next(18)}</a>` : ''}
       <div class="kv"><span class="k">Важность</span>
         <div class="levels" style="flex:1">${WEIGHTS.map((w) => {
           const X = weightLook[w], on = w === t.weight;
           return `<button data-act="weight" data-n="${n}" data-v="${w}" aria-pressed="${on}" style="height:36px;font-size:12px;background:${on ? X.ring : X.soft};color:${on ? '#fff' : X.softFg}">${X.label}</button>`;
         }).join('')}</div></div>
+      ${t.state !== 'убрана' ? repeatRow(t, false) : ''}
     </div>`;
 
   const workerBody = `<div class="list">
       <div class="kv"><span class="k">От кого</span><span class="v">Мастер</span></div>
       <div class="kv"><span class="k">Срок</span><span class="v">${esc(dueText(t.due))}</span><span class="pill" style="background:${L.bg};color:${L.fg}">${L.label}</span></div>
-      ${t.order ? `<div class="kv"><span class="k">Заказ</span><span class="v">${esc(t.order)}</span></div>` : ''}
+      ${t.order ? `<a class="kv" href="#/order/${encodeURIComponent(t.order)}" style="text-decoration:none;color:inherit"><span class="k">Заказ</span><span class="v">${esc(t.order)}</span>${icon.next(18)}</a>` : ''}
+      ${repeatRow(t, true)}
     </div>`;
 
   return `<main class="screen with-cta">
@@ -77,6 +126,7 @@ export function render(params) {
     </div>
     <h1 style="font-size:24px;font-weight:700;line-height:1.25;${done ? 'text-decoration:line-through;color:#8C918A' : ''}">${esc(t.text)}</h1>
     ${worker ? workerBody : ownerBody}
+    ${itemsBlock(t, worker)}
     ${steps}
     <section style="display:flex;flex-direction:column;gap:8px" aria-label="Переписка">
       <h2 class="section-title">${t.to ? 'Переписка' : 'Комментарии'}</h2>
@@ -109,6 +159,8 @@ export function mount(root, params) {
     store.ui['read' + n] = true;
     store.act('taskRead', { n }, (d) => { const x = d.tasks.find((y) => y.n === n); if (x) x.delivery.read = new Date().toISOString(); });
   }
+  const it = root.querySelector('#it-new');
+  if (it) it.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector('[data-act="it-plus"]').click(); } };
   const input = root.querySelector('#cmt');
   if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector('[data-act="comment"]').click(); } });
 }
@@ -163,6 +215,49 @@ export const on = {
       const x = d.tasks.find((y) => y.n === n); if (x) x.comments.push({ ts: new Date().toISOString(), who, text: text || 'фото', localPhoto: photo });
     }, photo ? 'Фото отправлено' : '');
   },
+};
+
+/* Пункты: отметка — сразу на экране, запрос в фоне (можно и без связи). */
+const curN = () => Number(location.hash.split('/')[2]);
+const saveItems = (n, list, ok) => store.act('taskUpdate', { n, items: list.map((x) => x.t) }, (d) => {
+  const x = d.tasks.find((y) => y.n === n); if (x) x.items = list;
+}, ok);
+on['it-check'] = (el) => {
+  const n = Number(el.dataset.n), i = Number(el.dataset.i);
+  const t = ((store.data && store.data.tasks) || []).find((x) => x.n === n);
+  const it = t && (t.items || [])[i];
+  if (!it) return;
+  const done = !it.d;
+  const left = t.items.filter((x, j) => j !== i && !x.d).length;
+  return store.act('taskCheck', { n, i, done }, (d) => {
+    const x = d.tasks.find((y) => y.n === n);
+    if (x && x.items[i]) Object.assign(x.items[i], { d: done, by: done ? (store.me && store.me.name) : '', at: done ? new Date().toISOString() : '' });
+  }, done && !left ? 'Все пункты отмечены ✓' : '');
+};
+on['it-edit'] = () => { store.ui.itemsEdit = store.ui.itemsEdit === curN() ? null : curN(); store.emit(); };
+on['it-drop'] = (el) => {
+  const n = Number(el.dataset.n), i = Number(el.dataset.i);
+  const t = ((store.data && store.data.tasks) || []).find((x) => x.n === n);
+  if (!t) return;
+  return saveItems(n, t.items.filter((x, j) => j !== i));
+};
+on['it-plus'] = (el) => {
+  const n = Number(el.dataset.n);
+  const inp = document.getElementById('it-new');
+  const text = ((inp && inp.value) || '').trim();
+  if (!text) { inp && inp.focus(); return; }
+  const t = ((store.data && store.data.tasks) || []).find((x) => x.n === n);
+  if (!t) return;
+  if ((t.items || []).some((x) => x.t === text)) { store.say('Такой пункт уже есть', 'error'); return; }
+  inp.value = '';
+  const r = saveItems(n, (t.items || []).concat([{ t: text, d: false }]));
+  setTimeout(() => document.getElementById('it-new')?.focus(), 0);
+  return r;
+};
+on['rep-toggle'] = () => { store.ui.repeatEdit = store.ui.repeatEdit === curN() ? null : curN(); store.emit(); };
+on['rep-set'] = (el) => {
+  store.ui.repeatEdit = null;
+  return upd(Number(el.dataset.n), { repeat: el.dataset.v }, el.dataset.v ? 'Повтор: ' + repeatText(el.dataset.v) : 'Больше не повторяется');
 };
 
 on['cmt-photo'] = async () => { const d = await pickPhoto(); if (d) { store.ui.cmtPhoto = d; store.emit(); } };

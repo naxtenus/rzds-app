@@ -89,6 +89,7 @@ export const store = {
     };
     /* Уже что-то ждёт — это нажатие встаёт за ним: порядок важен. */
     if (canQueue && outbox.size) { const r = toOutbox('', true); this.sendOutbox(); return r; }
+    this.inflight = (this.inflight || 0) + 1;
     try {
       const res = await api(action, body);
       this.took(res);
@@ -103,6 +104,8 @@ export const store = {
       this.say(e.message || 'Не получилось', 'error');
       this.emit();
       return null;
+    } finally {
+      this.inflight--;
     }
   },
 

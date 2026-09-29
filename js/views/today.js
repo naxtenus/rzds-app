@@ -60,6 +60,7 @@ export function render() {
             <span class="small muted strong">${esc(o.res || '')} · ${esc(o.order || r.opCode)} · ${hhmm(r.at)}</span>${kindPill(r)}
           </div>
           <div class="strong" style="font-size:15px">${esc(r.text)}</div>${thumbs(r.photos)}
+          ${r.text && r.kind !== 'start' ? `<a class="link-btn to-task" style="color:inherit;opacity:.85" href="#/new?text=${encodeURIComponent(r.text + (r.who ? ' (' + r.who + ')' : ''))}${o.order ? '&order=' + encodeURIComponent(o.order) : ''}">${icon.plus(14)} Сделать задачей</a>` : ''}
           <div class="btns">
             <button class="btn primary" data-act="decide" data-id="${esc(r.id)}" data-yes="1">${yes}</button>
             ${no ? `<button class="btn" data-act="decide" data-id="${esc(r.id)}" data-yes="0">${no}</button>` : ''}
@@ -99,7 +100,7 @@ export function render() {
         <h1 class="title">Сегодня</h1>
         <div class="sub">${dayTitle(now)}</div>
       </div>
-      <div style="display:flex;gap:8px"><a class="icon-btn" href="#/search" aria-label="Поиск">${icon.search(22)}</a>
+      <div style="display:flex;gap:8px"><a class="icon-btn" href="#/scan" aria-label="Сканировать QR-код детали">${icon.qr(22)}</a><a class="icon-btn" href="#/search" aria-label="Поиск">${icon.search(22)}</a>
       <a class="icon-btn" href="#/notify" aria-label="Уведомления${bells ? ', ' + bells + ' новых' : ''}">${icon.bell()}${bells ? `<span class="badge">${bells}</span>` : ''}</a></div>
     </header>
     ${statusLine()}

@@ -3,7 +3,7 @@
    потрогать до того, как сервер подключён, и чтобы проверять экраны без
    риска задеть боевой план. Всё хранится в памяти телефона. */
 
-const KEY = 'rzds-demo-v1';
+const KEY = 'rzds-demo-v2';
 
 const at = (dayOffset, h, m = 0) => {
   const d = new Date(); d.setHours(0, 0, 0, 0);
@@ -69,14 +69,18 @@ function seed() {
       { n: 6, text: 'Покрасить кронштейны ФД 4', weight: 'обычная', due: at(2, 17), state: 'открыта', to: 'w5', order: 'ФД 4',
         delivery: { sent: minutesAgo(45), delivered: minutesAgo(45) }, comments: [] },
       { n: 7, text: 'Проверить вылет фрезы Ø12 перед ФДЗ', weight: 'важно', due: at(0, 14), state: 'открыта', to: 'w1', order: 'ФДЗ',
-        delivery: { sent: at(0, 7, 55), delivered: at(0, 7, 55) }, comments: [] },
+        delivery: { sent: at(0, 7, 55), delivered: at(0, 7, 55) }, comments: [],
+        items: [{ t: 'Замерить вылет индикатором', d: false }, { t: 'Записать в карту наладки', d: false }] },
+      { n: 8, text: 'Заточка фрез', weight: 'обычная', due: at(0, 16), state: 'открыта', to: 'w3', order: '', repeat: 'будни',
+        delivery: { sent: at(0, 7), delivered: at(0, 7), read: at(0, 7, 30) }, comments: [] },
     ],
     settings: {
       problem: true, answers: true, morning: true, weekly: true,
       taskDue: true, taskReply: true, taskUnread: true,
       workerNew: true, workerReport: true, quiet: false, telegram: true,
     },
-    nextTask: 8,
+    nextTask: 9,
+    chats: { 'ФДЗ': [{ ts: at(0, 9, 40), who: 'Оператор фре1360', text: 'Заготовки ФДЗ короче на 2 мм, чем в чертеже. Работать?' }] },
     checklists: { 'фре1360': ['Проверить вылет фрезы', 'Зажим детали', 'СОЖ включена'], 'все': ['Очки надеты'] },
     docs: {
       'ФДЗ': [{ kind: 'КД', title: 'Чертёж ФДЗ-01', url: 'https://example.com/fdz.pdf' }, { kind: 'Карта наладки', title: 'Наладка фре1360', url: 'https://example.com/nal.pdf' }],
@@ -142,6 +146,23 @@ const view = (me) => {
   };
 };
 
+/* Повтор: следующий подходящий день после прежнего срока, не раньше завтра. */
+const fits = (r, d) => {
+  const wd = (d.getDay() + 6) % 7 + 1;
+  if (r === 'день') return true;
+  if (r === 'будни') return wd <= 5;
+  let m = /^нед:(.+)$/.exec(r); if (m) return m[1].split(',').includes(String(wd));
+  m = /^мес:(\d+)$/.exec(r); if (m) return d.getDate() === Math.min(Number(m[1]), new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate());
+  return false;
+};
+const nextDue = (r, prev) => {
+  const d = prev ? new Date(prev) : new Date();
+  const tomorrow = new Date(); tomorrow.setHours(0, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
+  for (let i = 0; i < 800; i++) { d.setDate(d.getDate() + 1); if (d >= tomorrow && fits(r, d)) return d.toISOString(); }
+  return '';
+};
+const RULE = /^(день|будни|нед:[1-7](,[1-7])*|мес:([1-9]|[12]\d|3[01]))$/;
+
 const ME = {
   owner: { role: 'owner', name: 'Павел', id: 'owner' },
   worker: { role: 'worker', name: 'Оператор фре1360', id: 'w1' },
@@ -177,19 +198,32 @@ export const demo = {
       case 'taskSave': {
         const t = p.task || {};
         if (!String(t.text || '').trim()) throw new Error('Напишите, что сделать');
+        if (t.repeat && !RULE.test(t.repeat)) throw new Error('Не понял правило повтора: ' + t.repeat);
         const n = db.nextTask++;
         const now = new Date().toISOString();
         db.tasks.push({
           n, text: String(t.text).trim(), weight: t.weight || 'обычная', due: t.due || '',
           state: 'открыта', to: t.to || '', order: t.order || '', comments: t.photo ? [{ ts: now, who: 'Вы', text: 'фото', photos: [savePhoto(t.photo)] }] : [],
+          repeat: t.repeat || '', items: (t.items || []).map((x) => String(x).trim()).filter(Boolean).map((x) => ({ t: x, d: false })),
           delivery: t.to ? { sent: now, delivered: now } : undefined,
         });
         out = Object.assign(view(me), { created: n }); break;
       }
       case 'taskUpdate': {
         const t = task(p.n); if (!t) throw new Error('Задача не найдена');
-        ['weight', 'due', 'state', 'to', 'text'].forEach((k) => { if (p[k] !== undefined) t[k] = p[k]; });
+        if (p.repeat && !RULE.test(p.repeat)) throw new Error('Не понял правило повтора: ' + p.repeat);
+        ['weight', 'due', 'state', 'to', 'text', 'repeat'].forEach((k) => { if (p[k] !== undefined) t[k] = p[k]; });
+        if (p.items !== undefined) {
+          const was = {}; (t.items || []).forEach((x) => { was[x.t] = x; });
+          t.items = p.items.map((x) => String(x).trim()).filter(Boolean).map((x) => was[x] || { t: x, d: false });
+        }
         if (p.state === 'закрыта') { t.closed = new Date().toISOString(); t.by = by; }
+        if (p.state === 'закрыта' && t.repeat) {
+          const now = new Date().toISOString();
+          db.tasks.push({ n: db.nextTask++, text: t.text, weight: t.weight, due: nextDue(t.repeat, t.due), state: 'открыта', to: t.to, order: t.order,
+            comments: [], repeat: t.repeat, items: (t.items || []).map((x) => ({ t: x.t, d: false })), delivery: t.to ? { sent: now, delivered: now } : undefined });
+          t.repeat = '';
+        }
         if (p.taken && t.delivery) t.delivery.taken = new Date().toISOString();
         out = view(me); break;
       }
@@ -201,6 +235,20 @@ export const demo = {
         t.comments.push({ ts: new Date().toISOString(), who: by, text: text2, photos: p.photo ? [savePhoto(p.photo)] : [] });
         out = view(me); break;
       }
+      case 'taskCheck': {
+        const t = task(p.n); if (!t) throw new Error('Задача не найдена');
+        const x = (t.items || [])[Number(p.i)]; if (!x) throw new Error('Такого пункта нет — обновите экран');
+        Object.assign(x, { d: !!p.done, by: p.done ? me.name : '', at: p.done ? new Date().toISOString() : '' });
+        out = view(me); break;
+      }
+      case 'orderSay': {
+        const text = String(p.text || '').trim();
+        if (!text && !p.photo) throw new Error('Пустое сообщение');
+        db.chats = db.chats || {};
+        (db.chats[p.order] || (db.chats[p.order] = [])).push({ ts: new Date().toISOString(), who: me.name, text: text || 'фото', photos: p.photo ? [savePhoto(p.photo)] : [] });
+        out = { chat: db.chats[p.order] }; break;
+      }
+      case 'ping': out = { ok: true }; break;
       case 'taskRead': {
         const t = task(p.n);
         if (t && t.delivery && !t.delivery.read) t.delivery.read = new Date().toISOString();
@@ -246,7 +294,7 @@ export const demo = {
         const name = (o && o.name) || ((db.passports || {})[p.order] || {})['Наименование'] || '';
         const earlier = Object.keys(db.passports || {}).filter((k) => k !== p.order && db.passports[k]['Наименование'] === name)
           .map((k) => ({ order: k, name, finished: db.passports[k]['Выполнен'] || '', docs: 0 }));
-        out = { order: p.order, name, docs: (db.docs || {})[p.order] || [], passport: (db.passports || {})[p.order] || null, earlier };
+        out = { order: p.order, name, docs: (db.docs || {})[p.order] || [], passport: (db.passports || {})[p.order] || null, earlier, chat: (db.chats || {})[p.order] || [] };
         break;
       }
       case 'checklistSave': {

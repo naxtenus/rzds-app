@@ -9,7 +9,7 @@
 
 import { esc, icon, hhmm, dayShort, sameDay, dueText } from '../util.js';
 import { store } from '../store.js';
-import { weightLook } from '../ui.js';
+import { weightLook, taskExtras } from '../ui.js';
 import { pickPhoto, draftThumb } from '../photo.js';
 
 const ACTIVE = ['в работе', 'проблема', 'пауза'];
@@ -96,7 +96,9 @@ function checkSheet(d, cur) {
 export function render() {
   const d = store.data || {};
   const me = store.me || {};
-  const cur = currentOp(d);
+  /* Навёл камеру на QR маршрутного листа — на экране эта операция. */
+  const focus = store.ui.focusOp && (d.ops || []).find((o) => o.code === store.ui.focusOp);
+  const cur = focus || currentOp(d);
   const form = store.ui.shiftForm;
   const next = (d.ops || []).filter((o) => o !== cur && o.status === 'план' && new Date(o.start) > new Date())
     .sort((a, b) => new Date(a.start) - new Date(b.start)).slice(0, 3);
@@ -113,6 +115,8 @@ export function render() {
         ${docs}`;
     } else if (cur.status === 'ждёт решения') {
       actions = `<div class="info">${icon.check(20)}<span>Отметка ушла мастеру в ${hhmm(cur.factEnd || new Date())}. Ждём его решения.</span></div>`;
+    } else if (cur.status === 'выполнено') {
+      actions = `<div class="info">${icon.check(20)}<span>Операция выполнена${cur.factEnd ? ' в ' + hhmm(cur.factEnd) : ''}.</span></div>${docs}`;
     } else if (cur.status === 'пауза') {
       actions = `<div class="timer paused">${icon.clock(20)}<span><b>На паузе ${cur.pauseAt ? span(cur.pauseAt) : ''}</b>${cur.pause ? ' · ' + esc(cur.pause) : ''}</span></div>
         <button class="btn primary big" data-act="mark" data-w="resume" data-op="${esc(cur.code)}">${icon.play(24)} Продолжил</button>
@@ -142,18 +146,20 @@ export function render() {
         <div class="eyebrow">Моя смена</div>
         <div class="sub" style="margin-top:2px">${esc(me.name || '')} · ${dayShort(new Date())}</div>
       </div>
-      <a class="icon-btn" href="#/notify" aria-label="Уведомления и настройки">${icon.bell()}</a>
+      <div style="display:flex;gap:8px"><a class="icon-btn" href="#/scan" aria-label="Сканировать QR-код детали">${icon.qr(22)}</a>
+      <a class="icon-btn" href="#/notify" aria-label="Уведомления и настройки">${icon.bell()}</a></div>
     </header>
     ${endSoon ? `<div class="info bronze" role="status">${icon.clock(20)}<span>Скоро конец смены — не забудьте отметить, что сделано.</span></div>` : ''}
     ${cur ? `<section class="shift-card">
       <div class="row-between" style="align-items:center">
-        <span class="pill green" style="font-size:13px">${cur.status === 'план' ? 'Следующее' : 'Сейчас'}</span>
+        ${focus ? `<span class="pill bronze" style="font-size:13px">${icon.qr(14)} По QR-коду</span>` : `<span class="pill green" style="font-size:13px">${cur.status === 'план' ? 'Следующее' : 'Сейчас'}</span>`}
         <span class="small muted">${hhmm(cur.start)} – ${hhmm(cur.end)}${sameDay(cur.start, new Date()) ? '' : ' · ' + esc(dueText(cur.start, false))}</span>
       </div>
       <div><div class="order-big" style="${cur.order.length > 8 ? 'font-size:26px' : cur.order.length > 6 ? 'font-size:32px' : ''}">${esc(cur.order)}</div>
         <div class="strong" style="margin-top:8px;font-size:17px">${esc(cur.op)}</div>
         <div class="small muted" style="margin-top:2px">${esc(cur.res)}</div></div>
       ${actions}
+      ${focus ? '<button class="link-btn" data-act="unfocus" style="align-self:center;font-size:14px">К текущему заданию</button>' : ''}
     </section>` : `<section class="card empty">На сегодня заданий нет. Когда мастер поставит — придёт уведомление.</section>`}
 
     ${tasks.length ? `<section style="display:flex;flex-direction:column;gap:8px">
@@ -164,7 +170,7 @@ export function render() {
         return `<div class="task${done ? ' is-done' : ''}" style="padding-left:14px;align-items:center">
           <a class="body" href="#/task/${t.n}">
             <span class="text">${!t.delivery || !t.delivery.read ? '<span class="dot" style="display:inline-block;background:#C62828;margin-right:6px;vertical-align:1px"></span>' : ''}${esc(t.text)}</span>
-            <span class="meta"><span class="muted">${esc(dueText(t.due))}</span><span class="pill" style="background:${L.bg};color:${L.fg}">${L.label}</span>
+            <span class="meta"><span class="muted">${esc(dueText(t.due))}</span><span class="pill" style="background:${L.bg};color:${L.fg}">${L.label}</span>${taskExtras(t)}
             ${(t.comments || []).length ? `<span class="muted" style="display:inline-flex;gap:4px;align-items:center">${icon.chat(14)}${t.comments.length}</span>` : ''}</span>
           </a>
           ${done ? `<span class="check done"><i>${icon.check(14)}</i></span>`
@@ -184,6 +190,7 @@ export function render() {
 const clearForm = () => { store.ui.shiftForm = null; store.ui.shiftDraft = {}; };
 
 export const on = {
+  'unfocus': () => { store.ui.focusOp = null; clearForm(); store.emit(); },
   'check-open': (el) => { store.ui.checkOpen = el.dataset.op; store.ui.checked = {}; store.emit(); },
   'check-close': () => { store.ui.checkOpen = null; store.emit(); },
   'check-tick': (el) => { const g = store.ui.checked || (store.ui.checked = {}); g[el.dataset.i] = !g[el.dataset.i]; store.emit(); },

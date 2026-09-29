@@ -1,13 +1,13 @@
 /* Служебный работник приложения: хранит само приложение в телефоне (чтобы
    открывалось мгновенно и без связи) и принимает push-уведомления. */
 
-const VERSION = 'rzds-0.5.0';
+const VERSION = 'rzds-0.6.0';
 const SHELL = [
   './', 'index.html', 'app.css', 'config.js', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/mock.js', 'js/push.js', 'js/store.js', 'js/ui.js', 'js/util.js',
   'js/views/today.js', 'js/views/plan.js', 'js/views/tasks.js', 'js/views/task.js', 'js/views/newtask.js',
   'js/views/replies.js', 'js/views/notify.js', 'js/views/shift.js', 'js/views/login.js', 'js/views/calendar.js', 'js/views/sessions.js', 'js/outbox.js', 'js/photo.js',
-  'js/views/order.js', 'js/views/search.js', 'js/views/checklists.js',
+  'js/views/order.js', 'js/views/search.js', 'js/views/checklists.js', 'js/views/qr.js', 'js/parse.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'fonts/onest-cyrillic-400-normal.woff2', 'fonts/onest-cyrillic-500-normal.woff2',
   'fonts/onest-cyrillic-600-normal.woff2', 'fonts/onest-cyrillic-700-normal.woff2',
@@ -15,8 +15,13 @@ const SHELL = [
   'fonts/unbounded-cyrillic-600-normal.woff2', 'fonts/unbounded-latin-600-normal.woff2',
 ];
 
+/* Скачиваем мимо HTTP-кэша: GitHub Pages отдаёт файлы с «хранить 10 минут»,
+   и без этого в новую версию могли попасть старые файлы. */
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION)
+    .then((c) => Promise.all(SHELL.map((u) => fetch(new Request(u, { cache: 'reload' }))
+      .then((r) => { if (!r.ok) throw new Error(u + ' ' + r.status); return c.put(u, r); }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -25,25 +30,28 @@ self.addEventListener('activate', (e) => {
     .then(() => self.clients.claim()));
 });
 
-/* Своё — из памяти телефона, с тихим обновлением в фоне. Чужие адреса
-   (сервер Apps Script) не трогаем: данные должны быть живыми. */
-/* Код приложения — сначала из сети (чтобы после обновления сразу открывалась
-   новая версия), а без связи или при медленной сети (дольше 2,5 с) — из
-   памяти телефона. Шрифты и иконки не меняются — их сразу из памяти.
+/* Волна 3 (30.09): всё своё — сразу из памяти телефона, без запроса в сеть.
+   Раньше код шёл «сначала из сети»: три десятка файлов, на каждый —
+   запрос-проверка, на сотовой это до 2,5 с до первого экрана. Теперь экран
+   рисуется мгновенно, а обновление приходит целиком новой версией: телефон
+   сам сверяет sw.js, и если VERSION другая — скачивает все файлы заново
+   (событие install выше), после чего приложение перезапускается само.
+   ПОЭТОМУ: любая правка кода приложения → поднять VERSION здесь.
+   Файлы не из списка (библиотеки QR) кладутся в память при первом запросе.
    Чужие адреса (сервер Apps Script) не трогаем: данные должны быть живыми. */
-const STATIC = /\/(fonts|icons)\//;
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith(caches.open(VERSION).then(async (c) => {
     const hit = await c.match(e.request, { ignoreSearch: true });
-    if (hit && STATIC.test(url.pathname)) return hit;
-    const net = fetch(e.request, { cache: 'no-cache' })
-      .then((r) => { if (r.ok) c.put(e.request, r.clone()); return r; })
-      .catch(() => null);
-    if (!hit) return (await net) || c.match('index.html');
-    const slow = new Promise((r) => setTimeout(() => r(null), 2500));
-    return (await Promise.race([net, slow])) || hit;
+    if (hit) return hit;
+    try {
+      const r = await fetch(e.request);
+      if (r.ok && !/\/sw\.js$/.test(url.pathname)) c.put(e.request, r.clone());
+      return r;
+    } catch (err) {
+      return (e.request.mode === 'navigate' && (await c.match('index.html'))) || Response.error();
+    }
   }));
 });
 

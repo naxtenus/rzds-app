@@ -71,3 +71,11 @@ export const checkBtn = (t, act = 'task-toggle') => `
     ${t.state === 'закрыта' ? '' : `style="--r:${(weightLook[t.weight] || weightLook['обычная']).ring}"`}>
     <i style="${t.state === 'закрыта' ? '' : 'border-color:' + (weightLook[t.weight] || weightLook['обычная']).ring}">${t.state === 'закрыта' ? icon.check(14) : ''}</i>
   </button>`;
+
+/* В списке задач: повтор и пункты («🔁», «2/5»). */
+export const taskExtras = (t) => {
+  const it = t.items || [];
+  const d = it.filter((x) => x.d).length;
+  return (t.repeat ? '<span class="muted" title="Повторяется" aria-label="Повторяется">🔁</span>' : '') +
+    (it.length ? `<span class="muted strong" style="${d === it.length ? 'color:var(--green)' : ''}" aria-label="Пункты: ${d} из ${it.length}">☑ ${d}/${it.length}</span>` : '');
+};

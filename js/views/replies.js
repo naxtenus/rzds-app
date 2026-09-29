@@ -8,6 +8,9 @@ import { store } from '../store.js';
 import { thumbs } from '../photo.js';
 import { kindPill, decisionButtons, on as todayOn } from './today.js';
 
+/* «Задача из сообщения»: текст со смены → черновик новой задачи к тому же заказу. */
+const toTask = (r, o) => '#/new?text=' + encodeURIComponent(r.text + (r.who ? ' (' + r.who + ')' : '')) + (o.order ? '&order=' + encodeURIComponent(o.order) : '');
+
 export function render() {
   const d = store.data || {};
   const mode = store.ui.repMode || 'wait';
@@ -23,6 +26,7 @@ export function render() {
       <div><div class="strong" style="font-size:18px">${esc(o.order || r.opCode)}</div><div class="small muted">${esc(o.op || '')}${o.res ? ' · ' + esc(o.res) : ''}</div></div>
       ${r.text ? `<div style="padding:10px 12px;border-radius:14px;background:#F6F3EC;font-size:15px">«${esc(r.text)}»</div>` : ''}
       ${thumbs(r.photos)}
+      ${r.text && r.kind !== 'start' ? `<a class="link-btn to-task" href="${toTask(r, o)}">${icon.plus(14)} Сделать задачей</a>` : ''}
       ${open ? `${r.impact ? `<div class="small" style="display:flex;gap:8px;color:var(--bronze-dd)">${icon.plan(16)}<span>${esc(r.impact)}</span></div>` : ''}
         <div class="btns">
           <button class="btn primary" data-act="decide" data-id="${esc(r.id)}" data-yes="1">${yes}</button>
