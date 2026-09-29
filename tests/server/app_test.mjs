@@ -507,6 +507,17 @@ check("недельный отчёт — push «Недельный отчёт»,
   eq(pushes.length, 0, "ушло, хотя выключено");
   post({ a: "settingsSave", s: OWN, settings: { weekly: true } });
 });
+check("часы держат план в кэше тёплым: свежий не пересчитывают, старый — да", () => {
+  run("__счётДвижка = 0; engineNow_ = function(){ __счётДвижка++; return __старыйДвижок(); };");
+  post({ a: "load", s: OWN });
+  eq(j("Прил_прогреть_()"), false, "свежий план пересчитан");
+  const k = j("(function(){ __прил = {листы:{}}; var k = Прил_ключПлана_(); __прил = null; return k; })()");
+  run(`(function(){ var c = CacheService.getScriptCache(); var x = Прил_кэшВзять_(c, ${JSON.stringify(k)}); x.at = Date.now() - 11*60000; Прил_кэшПоложить_(c, ${JSON.stringify(k)}, x, 1800); })()`);
+  const n0 = j("__счётДвижка");
+  eq(j("Прил_прогреть_()"), true, "старый не пересчитан");
+  eq(j("__счётДвижка"), n0 + 1, "расчётов");
+  run("engineNow_ = __старыйДвижок;");
+});
 check("ответ приложения сообщает время сервера", () => { truthy(post({ a: "load", s: OWN }).ms >= 0, "нет ms"); });
 
 console.log(`\nИтого: ${ok} прошло, ${bad} упало`);

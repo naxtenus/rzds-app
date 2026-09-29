@@ -64,11 +64,12 @@ function Прил_св_() {
 /* ----------------------------------------------------------- вход в сеть */
 function Прил_doPost_(e) {
   __прил = { отложить: true, очередь: [], листы: {} };
-  var t0 = Date.now(), out;
+  var t0 = Date.now(), out, a = '';
   try {
     var сырьё = (e && e.postData && e.postData.contents) || '';
     var p = JSON.parse(сырьё || '{}');
-    out = Прил_действие_(s_(p.a), p);
+    a = s_(p.a);
+    out = Прил_действие_(a, p);
   } catch (err) {
     out = { error: String(err && err.message || err), code: err && err.code || '' };
   }
@@ -76,6 +77,9 @@ function Прил_doPost_(e) {
     if (__прил.очередь.length) { Прил_вОчередь_(__прил.очередь); out.flush = true; }
   } catch (err) { Logger.log('очередь уведомлений: %s', err); }
   out.ms = Date.now() - t0;
+  /* Видно в «Количестве выполнений» → строка → журнал: какое действие
+     сколько стоило (сами запросы там все называются doPost). */
+  try { console.log('приложение: ' + a + ' — ' + out.ms + ' мс' + (out.error ? ' — ' + out.error : '')); } catch (err) {}
   __прил = null;
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -432,13 +436,23 @@ function Прил_текстОтметки_(f) {
 
    В кэш не кладётся то, что меняется между сохранениями плана: ответы со
    смены, задачи, настройки. Их читаем каждый раз — они лёгкие. */
-var ПРИЛ_КЭШ_СЕК = 300;
-function Прил_планЧасть_() {
-  if (__прил && __прил.план) return __прил.план;
-  var tz = Session.getScriptTimeZone();
-  var ключ = 'app:plan:v' + Number(Прил_св_().PLAN_VERSION || 0) + ':' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd');
+/* Замер 29.09 на живом плане: чтение листов — около секунды, а расчёт
+   плана при промахе кэша — 2,3 с и больше. Кэш жил 5 минут, и каждое
+   открытие приложения после перерыва попадало на расчёт. Теперь кэш живёт
+   полчаса, а освежает его не человек, а часы приложения (раз в 5 минут,
+   если посчитанному больше 10 минут). Правка руками в таблице доходит до
+   телефона не позже чем через 15 минут; сохранение из планировщика —
+   сразу (меняется номер версии). */
+var ПРИЛ_КЭШ_СЕК = 1800, ПРИЛ_СВЕЖЕСТЬ_МС = 10 * 60000;
+function Прил_ключПлана_() {
+  return 'app:plan:v' + Number(Прил_св_().PLAN_VERSION || 0) + ':' +
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd');
+}
+function Прил_планЧасть_(заново) {
+  if (__прил && __прил.план && !заново) return __прил.план;
+  var ключ = Прил_ключПлана_();
   var c = CacheService.getScriptCache();
-  var готово = Прил_кэшВзять_(c, ключ);
+  var готово = заново ? null : Прил_кэшВзять_(c, ключ);
   if (готово) { if (__прил) __прил.план = готово; return готово; }
 
   var eng = engineNow_();
@@ -468,7 +482,7 @@ function Прил_планЧасть_() {
   });
   var рабочие = readTable_(SH.WRK, COL_WRK).filter(function (r) { return bool_(r['Активен']); })
     .map(function (r) { return { id: s_(r['Имя']), name: s_(r['Имя']), res: parseList_(r['Ресурсы']) }; });
-  var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие };
+  var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие, at: Date.now() };
   Прил_кэшПоложить_(c, ключ, часть, ПРИЛ_КЭШ_СЕК);
   if (__прил) __прил.план = часть;
   return часть;
@@ -1063,17 +1077,35 @@ function Прил_пушВладельцу_(text, kind) {
 function Триггер_приложение() {
   __прил = { отложить: false, очередь: [], листы: {} };
   var сейчас = new Date();
-  [Прил_разослать_, Прил_контрольДоставки_, Прил_напоминания_].forEach(function (f) {
+  [Прил_разослать_, Прил_контрольДоставки_, Прил_прогреть_, Прил_напоминания_].forEach(function (f) {
     try { f(сейчас); } catch (e) { Logger.log('часы приложения: %s', e && e.stack || e); }
   });
   __прил = null;
 }
 
-function Прил_часыЗавести_() {
-  var есть = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'Триггер_приложение'; });
-  if (!есть) ScriptApp.newTrigger('Триггер_приложение').timeBased().everyMinutes(5).create();
+/* План в кэше держим тёплым: посчитанному больше 10 минут — считаем
+   заново здесь, в часах, чтобы человеку не ждать расчёта. */
+function Прил_прогреть_() {
+  var c = CacheService.getScriptCache();
+  var ч = Прил_кэшВзять_(c, Прил_ключПлана_());
+  if (ч && ч.at && Date.now() - ч.at < ПРИЛ_СВЕЖЕСТЬ_МС) return false;
+  Прил_планЧасть_(true);
+  return true;
+}
+
+/* заново — снести и завести снова. Нужно, когда часы заведены из
+   веб-приложения: такой триггер привязан к версии развёртывания и после
+   выкладки продолжает крутить старый код. Заведённый из редактора
+   (Пуск_B) работает на последнем сохранённом коде. */
+function Прил_часыЗавести_(заново) {
+  var было = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() !== 'Триггер_приложение') return;
+    if (заново) ScriptApp.deleteTrigger(t); else было++;
+  });
+  if (!было) ScriptApp.newTrigger('Триггер_приложение').timeBased().everyMinutes(5).create();
   props_().setProperty('APP_CLOCK', '1');
-  return есть ? 'часы приложения уже идут' : 'часы приложения заведены';
+  return было ? 'часы приложения уже идут' : 'часы приложения заведены';
 }
 
 function Прил_напоминания_(сейчас) {
@@ -1237,7 +1269,7 @@ function Меню_вход_в_приложение() {
     ui.ButtonSet.OK);
 }
 function Пуск_A_вход_в_приложение() { своимиРуками_(); var r = Прил_выдатьКод_('Павел', 'owner'); Logger.log('Код: %s, адрес: %s', r.code, r.link); return r.code; }
-function Пуск_B_часы_приложения() { своимиРуками_(); var m = Прил_часыЗавести_(); Logger.log(m); return m; }
+function Пуск_B_часы_приложения() { своимиРуками_(); var m = Прил_часыЗавести_(true); Logger.log(m); return m; }
 
 /* Замер: сколько стоит каждый шаг ответа приложения. Запускать из
    редактора; итог — в журнале выполнения. */
