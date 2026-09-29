@@ -184,7 +184,7 @@ await expect((acts.flush || 0) > 0, "телефон просит разосла�
 await go("#/plan");
 const blk = await page.$('.blk[data-drag]');
 if (blk) {
-  await blk.click(); await sleep(400);
+  await blk.evaluate((e) => e.click()); await sleep(600);
   await page.click('[data-act="mv-open"]'); await sleep(400);
   const dd = await page.$$('#mvcal [data-act="cal-day"]:not([disabled])'); await dd[3].click(); await sleep(200);
   await page.click('[data-act="mv-preview"]'); await sleep(2500);
