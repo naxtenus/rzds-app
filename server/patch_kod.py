@@ -4,6 +4,7 @@
   1. doPost: запросы приложения (…/exec?app=1) уходят в Прил_doPost_.
   2. Уведомить_: всё, что уходит владельцу в Телеграм, дублируется push.
   3. Меню таблицы: пункт «Вход в приложение на телефон».
+  4. doGet: …/exec?appcode=1 — страница с кодом владельцу (с телефона).
 """
 import sys
 
@@ -26,6 +27,13 @@ PATCHES = [
      "    .addItem('Мои задачи', 'Меню_задачи')\n    .addItem('Вход в приложение на телефон', 'Меню_вход_в_приложение')\n",
      "Меню_вход_в_приложение'"),
 ]
+
+PATCHES.append((
+    "  var t = HtmlService.createTemplateFromFile('Index');\n",
+    "  /* Код входа в приложение на телефон — владельцу, прямо с телефона (App.gs). */\n"
+    "  if (p.appcode) return Прил_кодСтраница_(role);\n\n"
+    "  var t = HtmlService.createTemplateFromFile('Index');\n",
+    "Прил_кодСтраница_(role)"))
 
 for anchor, repl, marker in PATCHES:
     if marker in s:

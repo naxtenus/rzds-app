@@ -224,6 +224,7 @@ h1, h2, h3, p { margin: 0; }
   max-width: 560px; margin: 0 auto; animation: up .2s ease-out;
 }
 @keyframes up { from { transform: translateY(30px); opacity: .5; } to { transform: none; opacity: 1; } }
+@keyframes down { from { transform: translate(-50%, -16px); opacity: .4; } to { transform: translate(-50%, 0); opacity: 1; } }
 .grab { align-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--btnline); }
 
 /* ------------------------------------------------------------- переключатели */
@@ -253,7 +254,7 @@ h1, h2, h3, p { margin: 0; }
 /* ---------------------------------------------------------------- тосты */
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); z-index: 50;
-  bottom: calc(var(--tabh) + var(--bottom) + 20px); max-width: calc(100% - 32px);
+  top: calc(var(--top) + 12px); max-width: calc(100% - 32px);
   padding: 12px 16px; border-radius: 14px; background: #1B1F1C; color: #fff; font-size: 15px; font-weight: 600;
   box-shadow: 0 8px 24px rgba(0,0,0,.25); animation: up .2s ease-out;
   width: max-content; text-align: center;
@@ -270,3 +271,43 @@ button.kv { font: inherit; color: inherit; cursor: pointer; }
 
 .decide .btn { font-size: 14px; padding: 0 10px; line-height: 1.15; }
 .btn.tall.danger, .grid2 .btn.tall { font-size: 15px; line-height: 1.15; }
+
+/* ---------------------------------------------- отклик на нажатие (29.09) */
+.spinner { display: inline-block; width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%;
+  border: 2.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+.check .spinner { width: 22px; height: 22px; color: var(--green); }
+.toast.wait { display: flex; align-items: center; gap: 10px; }
+.toast.ok { background: var(--green-d); }
+.busy { pointer-events: none; }
+.btn.busy, .chip.busy, .check.busy, .levels button.busy, .switch.busy { opacity: .9; }
+.btn.busy::after, .chip.busy::after { content: ''; display: inline-block; width: 16px; height: 16px; flex-shrink: 0;
+  border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+.check.busy i { border-style: dotted; animation: spin 1s linear infinite; }
+.task.saving { opacity: .85; }
+.chip, .levels button, .check, .tile, .kv[data-act], .switch { transition: transform .08s ease; }
+.chip:active, .levels button:active, .check:active, .tile:active, .switch:active { transform: scale(.95); }
+
+/* ---------------------------------------------------- календарь (29.09) */
+.cal { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.cal-sum { font-size: 16px; font-weight: 700; color: var(--green-d); background: var(--green-l); border-radius: 12px; padding: 10px 12px; text-align: center; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; }
+.cal-head b { font-size: 17px; }
+.cal-head .icon-btn { width: 44px; height: 44px; font-size: 24px; line-height: 1; }
+.cal-head .icon-btn[disabled] { opacity: .3; }
+.cal-wd, .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; text-align: center; }
+.cal-wd span { font-size: 12px; font-weight: 700; color: var(--muted); }
+.cal-wd .wknd { color: #A8ABA6; }
+.cal-d { position: relative; height: 44px; border: none; border-radius: 12px; background: var(--bg2); font-size: 16px; font-weight: 600; color: var(--ink); }
+.cal-d.wknd { color: #8C918A; background: transparent; }
+.cal-d.today { box-shadow: inset 0 0 0 2px var(--bronze); }
+.cal-d.sel { background: var(--green); color: #fff; box-shadow: none; }
+.cal-d[disabled] { color: #C9C6BE; background: transparent; }
+.cal-d:active { transform: scale(.92); }
+.cal-times { display: flex; flex-wrap: wrap; gap: 6px; }
+.cal-times .chip { height: 40px; padding: 0 12px; }
+.cal-d small { position: absolute; top: 2px; left: 0; right: 0; font-size: 9px; font-weight: 700; color: var(--bronze-d); text-transform: uppercase; line-height: 1; }
+.cal-d.sel small { color: #CFE5D6; }
+.cal-d { padding-top: 6px; }
+.task.flash { animation: flash 2.4s ease-out; }
+@keyframes flash { 0%, 30% { background: var(--green-l); } 100% { background: transparent; } }
+.toast { animation: down .18s ease-out; z-index: 60; }

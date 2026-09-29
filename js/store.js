@@ -73,6 +73,7 @@ export const store = {
       const res = await api(action, payload);
       if (res && res.me) { this.data = res; this.syncedAt = Date.now(); this.persist(); }
       if (okText) this.say(okText);
+      else if (this.toast && this.toast.kind === 'wait') this.toast = null;
       this.emit();
       return res;
     } catch (e) {
@@ -88,6 +89,7 @@ export const store = {
     this.toast = { text, kind, id: Date.now() };
     this.emit();
     const id = this.toast.id;
+    if (kind === 'wait') return;   // «сохраняю…» висит, пока его не сменит ответ
     setTimeout(() => { if (this.toast && this.toast.id === id) { this.toast = null; this.emit(); } }, kind === 'error' ? 5000 : 2600);
   },
 

@@ -139,7 +139,7 @@ const ME = {
 export const demo = {
   isDemo: true,
   async call(action, p = {}, session = {}) {
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, Number((() => { try { return localStorage.getItem('rzds-demo-delay'); } catch (e) { return 0; } })()) || 120));
     const me = ME[session.role] || ME.owner;
     const by = me.role === 'worker' ? me.name : 'Вы';
     const task = (n) => db.tasks.find((t) => t.n === Number(n));

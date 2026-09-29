@@ -20,14 +20,19 @@ export function renderLogin() {
       <img src="icons/icon-192.png" alt="" width="64" height="64" style="border-radius:16px">
       <div><div class="eyebrow">РЗДС</div><h1 class="title" style="font-size:24px;margin-top:2px">План производства</h1></div>
     </div>
-    ${needInstallHint() ? `<a class="info bronze" href="#/install" style="text-decoration:none">${icon.addBox(20)}<span>Сначала добавьте приложение на экран «Домой» — иначе на айфоне не придут уведомления. <u>Как это сделать</u></span></a>` : ''}
+    ${needInstallHint() ? `<a class="info bronze" href="#/install" style="text-decoration:none">${icon.addBox(20)}<span>Сначала добавьте приложение на экран «Домой» и входите уже из иконки: у Safari и у иконки разная память, вход в Safari иконке не передаётся. <u>Как добавить</u></span></a>` : ''}
     ${hasServer() ? `
       <form data-form="login" style="display:flex;flex-direction:column;gap:12px">
         <label class="strong" for="code">Код входа</label>
         <input id="code" class="code-input" inputmode="text" autocomplete="one-time-code" autocapitalize="characters" maxlength="12" value="${esc(code)}" placeholder="••••••">
-        <div class="small muted">Владелец берёт код в Google Таблице: меню «Планировщик» → «Вход в приложение на телефон». Рабочим коды выдаёт владелец в приложении. Код вводится один раз на этом телефоне.</div>
         <button class="btn primary tall" type="submit">Войти</button>
-      </form>` : `
+      </form>
+      <section class="card" style="display:flex;flex-direction:column;gap:10px">
+        <div class="strong">Нет кода?</div>
+        <a class="btn tall" data-act="owner-code" href="${esc(store.ui.ownerLink || '#/')}" target="_blank" rel="noopener">Я владелец — получить код</a>
+        <div class="small muted">Откроется план производства со входом через Google и покажет код. Вернитесь сюда и введите его. Тот же код годится на три входа — например, в Safari и в иконке.</div>
+        <div class="small muted"><b>Рабочим</b> код выдаёт мастер: в приложении колокольчик → «Выдать вход».</div>
+      </section>` : `
       <div class="info bronze">${icon.alert(20)}<span>Сервер ещё не подключён. Можно посмотреть приложение на демо-данных — в настоящий план ничего не попадёт.</span></div>`}
     <div style="display:flex;flex-direction:column;gap:8px">
       <button class="btn${hasServer() ? '' : ' primary'} tall" data-act="demo" data-r="owner">Демо: вид владельца</button>
@@ -58,7 +63,22 @@ export function renderInstall() {
   </main>`;
 }
 
+/* Адрес страницы с кодом узнаём у сервера заранее: на айфоне окно можно
+   открыть только прямо в ответ на нажатие, ждать сервер в этот момент нельзя. */
+export function mountLogin() {
+  if (store.ui.ownerLink || store.ui.ownerLinkAsked || !hasServer()) return;
+  store.ui.ownerLinkAsked = true;
+  backend().call('ownerLink', {}, {}).then((r) => { if (r && r.url) { store.ui.ownerLink = r.url; store.emit(); } }).catch(() => {});
+}
+
 export const on = {
+  'owner-code': (el, e) => {
+    if (store.ui.ownerLink) return;           // обычная ссылка — откроется сама
+    e.preventDefault();
+    store.say('Узнаю адрес плана…', 'wait');
+    return backend().call('ownerLink', {}, {}).then((r) => { store.ui.ownerLink = r.url; store.toast = null; location.href = r.url; })
+      .catch((err) => store.say(err.message || 'Нет связи с сервером', 'error'));
+  },
   'demo': (el) => {
     const role = el.dataset.r;
     session.set({ demo: true, role, me: role === 'worker' ? { role: 'worker', name: 'Оператор фре1360', id: 'w1' } : { role: 'owner', name: 'Павел', id: 'owner' } });

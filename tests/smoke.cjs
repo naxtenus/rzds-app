@@ -13,7 +13,7 @@ global.CSS = { escape: (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' +
 w.matchMedia = () => ({ matches: false, addEventListener() {} });
 global.confirm = () => true; w.confirm = () => true;
 global.atob = w.atob;
-w.scrollTo = () => {};
+w.scrollTo = () => {}; w.Element.prototype.scrollIntoView = function () {};
 const errors = [];
 process.on('unhandledRejection', (e) => errors.push('UNHANDLED: ' + (e && e.stack || e)));
 w.addEventListener('error', (e) => errors.push('ERR: ' + e.message));
@@ -74,9 +74,26 @@ const expect = (cond, msg) => { if (!cond) { errors.push('FAIL: ' + msg); consol
   expect(text().includes('Поручить: Слесарь'), 'кнопка меняется на «Поручить: Слесарь»');
   expect($('[data-bind="text"]').value === 'Проверить биение шпинделя', 'текст не потерялся при нажатии');
   await click('[data-act="set"][data-k="weight"][data-v="срочно"]');
-  await click('[data-act="save"]');
-  await sleep(400);
-  expect(location.hash === '#/tasks' && text().includes('Проверить биение шпинделя'), 'поручение появилось в списке');
+  console.log('Календарь');
+  await click('[data-act="set"][data-k="due"][data-v="pick"]');
+  expect(!!$('.cal') && document.querySelectorAll('.cal-d').length >= 28, 'календарь месяца виден сразу, без нажатий');
+  expect(!document.querySelector('input[type="datetime-local"]'), 'нет скрытого системного поля даты');
+  expect(/^[А-Я][а-я]+, \d+ [а-я]+, 17:00$/.test($('.cal-sum').textContent.trim()), 'над календарём словами: ' + $('.cal-sum').textContent.trim());
+  const days = [...document.querySelectorAll('.cal-d:not([disabled])')];
+  await click(days[days.length - 1]);
+  await click('[data-act="cal-time"][data-v="10:00"]');
+  expect($('.cal-d.sel') && $('.cal-sum').textContent.includes('10:00'), 'выбран день и время: ' + $('.cal-sum').textContent.trim());
+  await click('[data-act="cal-month"][data-v="1"]');
+  expect(!document.querySelector('.cal-d.sel'), 'календарь листается вперёд');
+  await click('[data-act="cal-month"][data-v="-1"]');
+  const saveBtn = $('[data-act="save"]');
+  saveBtn.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+  await sleep(30);
+  expect(location.hash === '#/tasks', 'после «Поручить» экран сменился мгновенно (до ответа сервера)');
+  expect(text().includes('отправляю…') && document.querySelector('.toast.wait'), 'в списке задача с «отправляю…» и строка состояния');
+  await sleep(500);
+  expect(text().includes('Проверить биение шпинделя') && !text().includes('отправляю…'), 'после ответа — обычная строка');
+  expect((document.querySelector('.toast') || {}).textContent?.includes('✓'), 'подтверждение с галочкой');
 
   console.log('Карточка');
   await go('#/task/4');

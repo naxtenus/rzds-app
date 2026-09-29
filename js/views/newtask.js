@@ -4,6 +4,7 @@
 import { esc, icon, initial } from '../util.js';
 import { weightLook, WEIGHTS } from '../ui.js';
 import { store } from '../store.js';
+import { calendar, calInit, calOn, calValue } from './calendar.js';
 
 const nextMonday = () => { const d = new Date(); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); return d; };
 const pad = (n) => String(n).padStart(2, '0');
@@ -17,13 +18,13 @@ const DUES = () => {
   const mon = nextMonday();
   return [todayOpt, { k: 'tom', l: 'Завтра 12:00', v: at(tm, 12) },
     { k: 'mon', l: 'Пн, ' + pad(mon.getDate()) + '.' + pad(mon.getMonth() + 1), v: at(mon, 12) },
-    { k: 'none', l: 'Без срока', v: null }, { k: 'pick', l: 'Дата…', v: 'pick' }];
+    { k: 'none', l: 'Без срока', v: null }, { k: 'pick', l: 'Другая дата', v: 'pick' }];
 };
 
 const draft = () => {
   if (!store.ui.draft) {
     const q = new URLSearchParams((location.hash.split('?')[1]) || '');
-    store.ui.draft = { text: '', to: q.get('to') || '', due: 'today', pick: '', weight: 'обычная', order: q.get('order') || '' };
+    store.ui.draft = { text: '', to: q.get('to') || '', due: 'today', cal: null, weight: 'обычная', order: q.get('order') || '' };
   }
   return store.ui.draft;
 };
@@ -54,9 +55,8 @@ export function render() {
 
     <section style="display:flex;flex-direction:column;gap:8px">
       <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Срок</h2>
-      <div class="chips">${DUES().map((o) => `<button class="chip${o.k === f.due ? ' on' : ''}" data-act="set" data-k="due" data-v="${o.k}" aria-pressed="${o.k === f.due}">${o.l}</button>`).join('')}</div>
-      ${f.due === 'pick' ? `<label class="input-row"><span class="sr">Дата и время</span>
-        <input type="datetime-local" data-bind="pick" value="${esc(f.pick)}"></label>` : ''}
+      <div class="chips">${DUES().map((o) => `<button class="chip${o.k === f.due ? ' on' : ''}" data-act="set" data-k="due" data-v="${o.k}" aria-pressed="${o.k === f.due}">${o.k === 'pick' ? '' : ''}${o.l}</button>`).join('')}</div>
+      ${f.due === 'pick' ? calendar(f.cal || (f.cal = calInit())) : ''}
     </section>
 
     <section style="display:flex;flex-direction:column;gap:8px">
@@ -86,29 +86,45 @@ export const on = {
   'set': (el) => {
     const f = draft();
     f[el.dataset.k] = el.dataset.v;
+    if (el.dataset.k === 'due' && el.dataset.v === 'pick' && !f.cal) f.cal = calInit();
     store.emit();
+    if (el.dataset.k === 'due' && el.dataset.v === 'pick') {
+      setTimeout(() => document.getElementById('cal')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+    }
   },
+  'cal-day': (el) => { if (calOn(draft().cal, el)) store.emit(); },
+  'cal-time': (el) => { if (calOn(draft().cal, el)) store.emit(); },
+  'cal-month': (el) => { if (calOn(draft().cal, el)) store.emit(); },
   'cancel': () => { store.ui.draft = null; },
-  'save': async () => {
+  /* Отклик — сразу. Жалоба 29.09: после нажатия пять секунд ничего не
+     происходило, хотелось нажать ещё раз. Теперь экран уходит в список
+     мгновенно, задача уже там с пометкой «сохраняю…», а внизу строка
+     состояния; подтверждение «поставлена ✓» — когда сервер ответил. Если
+     сервер отказал — возвращаемся в форму, всё набранное на месте. */
+  'save': () => {
     const f = draft();
     const text = (f.text || '').trim();
     if (!text) { store.say('Напишите, что сделать', 'error'); document.querySelector('[data-bind="text"]')?.focus(); return; }
     const opt = DUES().find((o) => o.k === f.due);
     let due = opt && opt.v && opt.v !== 'pick' ? opt.v.toISOString() : '';
     if (f.due === 'pick') {
-      if (!f.pick) { store.say('Выберите дату', 'error'); return; }
-      due = new Date(f.pick).toISOString();
+      const v = calValue(f.cal);
+      if (!v) { store.say('Выберите день в календаре', 'error'); return; }
+      due = v.toISOString();
     }
     const task = { text, to: f.to, due, weight: f.weight, order: f.order };
     const tmp = -Date.now();
-    const res = await store.act('taskSave', { task }, (d) => {
+    const kept = JSON.parse(JSON.stringify(f));
+    store.ui.draft = null;
+    location.hash = '#/tasks';
+    store.say(task.to ? 'Отправляю поручение…' : 'Сохраняю задачу…', 'wait');
+    return store.act('taskSave', { task }, (d) => {
       const now = new Date().toISOString();
-      d.tasks.push(Object.assign({ n: tmp, state: 'открыта', comments: [], delivery: task.to ? { sent: now } : undefined }, task));
+      d.tasks.push(Object.assign({ n: tmp, state: 'открыта', comments: [], saving: true, delivery: task.to ? { sent: now } : undefined }, task));
+    }, task.to ? 'Поручено — уведомление ушло ✓' : 'Задача поставлена ✓').then((res) => {
+      if (!res) { store.ui.draft = kept; location.hash = '#/new'; }
+      else if (res.created != null) { store.ui.flash = typeof res.created === 'object' ? res.created.n : res.created; store.emit(); }
+      return res;
     });
-    if (res) {
-      store.ui.draft = null;
-      store.say(task.to ? 'Поручено — уведомление ушло' : 'Задача поставлена');
-      location.hash = '#/tasks';
-    }
   },
 };

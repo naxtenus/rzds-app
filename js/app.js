@@ -25,7 +25,7 @@ function route() {
   const [name, ...params] = h.split('/');
   const s = session.get();
   if (name === 'install') return { name, view: OWNER.install, params };
-  if (!s) return { name: 'login', view: { render: login.renderLogin, on: login.on, onSubmit: login.onSubmit }, params };
+  if (!s) return { name: 'login', view: { render: login.renderLogin, on: login.on, onSubmit: login.onSubmit, mount: login.mountLogin }, params };
   const role = (s.me && s.me.role) || s.role;
   const table = role === 'worker' ? WORKER : OWNER;
   const home = role === 'worker' ? 'shift' : 'today';
@@ -47,7 +47,7 @@ function render() {
   root.querySelectorAll('#cmt, #shift-text').forEach((el) => { if (el.value) typed[el.id] = el.value; });
 
   root.classList.toggle('still', key === lastRoute);
-  const toast = store.toast ? `<div class="toast${store.toast.kind === 'error' ? ' error' : ''}" role="status">${esc(store.toast.text)}</div>` : '';
+  const toast = store.toast ? `<div class="toast ${store.toast.kind}" role="status">${store.toast.kind === 'wait' ? '<i class="spinner" aria-hidden="true"></i>' : ''}${esc(store.toast.text)}</div>` : '';
   const demo = store.isDemo && session.get() ? '<div class="demo-flag">ДЕМО</div>' : '';
   root.innerHTML = r.view.render(r.params) + toast + demo;
   if (key !== lastRoute) window.scrollTo(0, 0);
@@ -63,11 +63,26 @@ function render() {
     }
   }
   if (r.view.mount) r.view.mount(root, r.params);
+  applyBusy();
   const pending = (store.data && store.data.pending) || [];
   setBadge(store.me && store.me.role === 'owner' ? pending.length : 0);
 }
 
 /* ------------------------------------------------------------ события */
+/* Кнопка, чьё действие идёт к серверу, сразу получает крутилку и перестаёт
+   нажиматься — пока сервер не ответит. Жалоба 29.09: пять секунд ничего не
+   видно, и хочется нажать ещё раз (а второе нажатие — это вторая задача).
+   Экран за это время может перерисоваться, поэтому помним не саму кнопку,
+   а её «адрес»: действие + данные, и после каждой отрисовки отмечаем заново. */
+const busy = new Set();
+const keyOf = (el) => el.dataset.act + '|' + Object.keys(el.dataset).filter((k) => k !== 'act').sort()
+  .map((k) => k + '=' + el.dataset[k]).join('&');
+function applyBusy() {
+  if (!busy.size) return;
+  root.querySelectorAll('[data-act]').forEach((el) => {
+    if (busy.has(keyOf(el))) { el.classList.add('busy'); el.setAttribute('aria-busy', 'true'); }
+  });
+}
 root.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el || !root.contains(el)) return;
@@ -75,7 +90,13 @@ root.addEventListener('click', (e) => {
   const fn = (r.view.on || {})[el.dataset.act];
   if (!fn) return;
   if (el.tagName !== 'A') e.preventDefault();
-  fn(el, e);
+  if (el.classList.contains('busy')) return;
+  const out = fn(el, e);
+  if (out && typeof out.then === 'function') {
+    const k = keyOf(el);
+    busy.add(k); el.classList.add('busy');
+    out.catch(() => {}).finally(() => { busy.delete(k); render(); });
+  }
 });
 root.addEventListener('input', (e) => {
   const b = e.target.dataset && e.target.dataset.bind;
@@ -92,7 +113,14 @@ root.addEventListener('submit', (e) => {
   if (!f) return;
   e.preventDefault();
   const fn = (route().view.onSubmit || {})[f.dataset.form];
-  if (fn) fn(f, e);
+  if (!fn) return;
+  const btn = f.querySelector('[type="submit"]');
+  if (btn && btn.classList.contains('busy')) return;
+  const out = fn(f, e);
+  if (btn && out && typeof out.then === 'function') {
+    btn.classList.add('busy'); btn.disabled = true;
+    out.catch(() => {}).finally(() => { btn.classList.remove('busy'); btn.disabled = false; });
+  }
 });
 
 window.addEventListener('hashchange', () => {

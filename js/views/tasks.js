@@ -11,7 +11,15 @@ const byDue = (a, b) => (parseDue(a.due) || 8.64e15) - (parseDue(b.due) || 8.64e
 export function taskRow(d, t) {
   const del = t.to ? deliveryState(t) : null;
   const n = (t.comments || []).length;
-  return `<div class="task${t.state === 'закрыта' ? ' is-done' : ''}">
+  if (t.saving || t.n < 0) {
+    return `<div class="task saving" aria-busy="true" id="task-saving">
+    <span class="check"><i class="spinner" aria-hidden="true"></i></span>
+    <div class="body"><span class="text">${esc(t.text)}</span>
+      <span class="meta">${t.to ? `<span class="who">${avatar(personName(d, t.to))}${esc(personName(d, t.to))}</span>` : ''}
+        <span class="strong" style="color:var(--green)">${t.to ? 'отправляю…' : 'сохраняю…'}</span></span></div>
+  </div>`;
+  }
+  return `<div class="task${t.state === 'закрыта' ? ' is-done' : ''}${store.ui.flash === t.n ? ' flash' : ''}" id="task-${t.n}">
     ${checkBtn(t)}
     <a class="body" href="#/task/${t.n}">
       <span class="text">${esc(t.text)}</span>
@@ -67,6 +75,17 @@ export function render() {
       ${store.ui.showDone ? `<div class="list">${done.slice(-20).reverse().map((t) => taskRow(d, t)).join('')}</div>` : ''}
     </section>` : ''}
   </main>${tabbar('tasks', d)}`;
+}
+
+/* Только что поставленная задача — на виду: список прокручивается к ней,
+   строка коротко подсвечивается. Иначе поручение с дальним сроком уезжает
+   вниз списка, и снова кажется, что ничего не произошло. */
+export function mount(root) {
+  const el = root.querySelector('#task-saving') || (store.ui.flash != null && root.querySelector('#task-' + store.ui.flash));
+  if (!el || store.ui.flashShown === (el.id + store.ui.flash)) return;
+  store.ui.flashShown = el.id + store.ui.flash;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (el.classList.contains('flash')) setTimeout(() => { store.ui.flash = null; }, 2500);
 }
 
 export const toggleTask = async (n) => {

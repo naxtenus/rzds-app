@@ -1,12 +1,12 @@
 /* Служебный работник приложения: хранит само приложение в телефоне (чтобы
    открывалось мгновенно и без связи) и принимает push-уведомления. */
 
-const VERSION = 'rzds-0.2.1';
+const VERSION = 'rzds-0.3.0';
 const SHELL = [
   './', 'index.html', 'app.css', 'config.js', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/mock.js', 'js/push.js', 'js/store.js', 'js/ui.js', 'js/util.js',
   'js/views/today.js', 'js/views/plan.js', 'js/views/tasks.js', 'js/views/task.js', 'js/views/newtask.js',
-  'js/views/replies.js', 'js/views/notify.js', 'js/views/shift.js', 'js/views/login.js',
+  'js/views/replies.js', 'js/views/notify.js', 'js/views/shift.js', 'js/views/login.js', 'js/views/calendar.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'fonts/onest-cyrillic-400-normal.woff2', 'fonts/onest-cyrillic-500-normal.woff2',
   'fonts/onest-cyrillic-600-normal.woff2', 'fonts/onest-cyrillic-700-normal.woff2',

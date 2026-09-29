@@ -28,6 +28,7 @@ var COL_ППУШ = ['Кто', 'Адрес', 'Ключи', 'Устройство'
 var COL_ППОР = ['Номер задачи', 'Кому', 'Заказ', 'Отправлено', 'Доставлено', 'Прочитано', 'Взял'];
 var ПРИЛ_АДРЕС = 'https://naxtenus.github.io/rzds-app/';
 var ПРИЛ_ВЛАДЕЛЕЦ = 'владелец';
+var ПРИЛ_ВХОДОВ = 3;        // на сколько телефонов (или Safari + иконка) годится один код
 
 /* ----------------------------------------------------------- вход в сеть */
 function Прил_doPost_(e) {
@@ -46,6 +47,10 @@ function Прил_ошибка_(текст, код) { var e = new Error(текс
 
 function Прил_действие_(a, p) {
   if (a === 'login') return Прил_вход_(p);
+  /* Где владелец возьмёт код, если вышел: страница плана (вход по Google)
+     выдаёт его сама. Адрес плана и так защищён Google-входом — отдать его
+     без сессии безопасно, а зашивать в приложение незачем. */
+  if (a === 'ownerLink') return { url: webAppUrl_() + '?appcode=1' };
   var me = Прил_кто_(p.s);
   var вл = me.role === 'owner';
   switch (a) {
@@ -127,7 +132,27 @@ function Прил_вход_(p) {
       var до = r[3] instanceof Date ? r[3] : Utilities.parseDate(s_(r[3]), Session.getScriptTimeZone(), 'dd.MM.yyyy HH:mm');
       if (до < new Date()) throw Прил_ошибка_('Код просрочен — попросите новый');
       var сессия = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-      sh.getRange(i + 2, 3, 1, 6).setValues([['', '', Прил_хэш_(сессия), s_(p.ua).slice(0, 120), Прил_сейчас_(), Прил_сейчас_()]]);
+      /* Код годится на ПРИЛ_ВХОДОВ входов за сутки, а не на один. Живой
+         случай (29.09): владелец ввёл код в Safari, потом добавил приложение
+         на экран «Домой» — а у приложения с иконки своя память, и там снова
+         экран входа. Второй раз код уже не подходил, а взять новый с
+         телефона было негде. Каждый вход — своя строка и своя сессия, так
+         что отключить можно ровно один телефон. */
+      var сч = 'app:uses:' + код;
+      var было = Number(props_().getProperty(сч) || 0) + 1;
+      var строка = [Прил_хэш_(сессия), s_(p.ua).slice(0, 120), Прил_сейчас_(), Прил_сейчас_()];
+      if (!s_(r[4])) {
+        sh.getRange(i + 2, 5, 1, 4).setValues([строка]);
+      } else {
+        appendRow_(ПРИЛ.ВХОД, COL_ПВХ, {
+          'Имя': s_(r[0]), 'Роль': s_(r[1]), 'Код': '', 'Код до': '',
+          'Сессия': строка[0], 'Устройство': строка[1], 'Вошёл': строка[2], 'Был': строка[3], 'Активен': 'да',
+        });
+      }
+      if (было >= ПРИЛ_ВХОДОВ) {
+        sh.getRange(i + 2, 3, 1, 2).setValues([['', '']]);   // код израсходован
+        props_().deleteProperty(сч);
+      } else props_().setProperty(сч, String(было));
       var роль = s_(r[1]) === ПРИЛ_ВЛАДЕЛЕЦ ? 'owner' : 'worker';
       return { token: сессия, me: { role: роль, name: s_(r[0]), id: роль === 'owner' ? 'owner' : s_(r[0]) } };
     }
@@ -627,13 +652,40 @@ function Прил_пушВладельцу_(text, kind) {
     kind: kind === 'warn' ? 'problem' : 'note' }, null);
 }
 
+/* ----------------------------------------------- код владельцу с телефона */
+/* Страница плана по адресу …/exec?appcode=1. Сюда ведёт кнопка «Получить
+   код» на экране входа приложения: план открывается в Safari с входом через
+   Google, владелец узнан по почте — и видит код крупно, с кнопкой
+   «Скопировать». Из приложения Google Таблиц этого не сделать: на айфоне
+   своих пунктов меню у таблицы нет. Остальным — отказ. */
+function Прил_кодСтраница_(role) {
+  var тело;
+  if (!role || role.role !== 'owner') {
+    тело = '<h1>Код выдаёт владелец</h1><p>Попросите код у мастера: в приложении — колокольчик → «Выдать вход».</p>';
+  } else {
+    var r = Прил_выдатьКод_('Павел', 'owner');
+    тело = '<h1>Код входа в приложение</h1>' +
+      '<div class="code" id="c">' + r.code + '</div>' +
+      '<button onclick="navigator.clipboard.writeText(\'' + r.code + '\').then(function(){this.textContent=\'Скопировано ✓\'}.bind(this))">Скопировать код</button>' +
+      '<p>Вернитесь в приложение <b>РЗДС</b> (иконка на экране «Домой») и введите код.</p>' +
+      '<p class="m">Действует сутки, годится на три входа.</p>';
+  }
+  return HtmlService.createHtmlOutput(
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<style>body{font:17px -apple-system,system-ui,sans-serif;background:#F4F1EA;color:#1B1F1C;margin:0;padding:32px 22px;text-align:center}' +
+    'h1{font-size:22px;margin:0 0 20px}.code{font:700 44px ui-monospace,Menlo,monospace;letter-spacing:.2em;background:#fff;border:1px solid #E0DACD;border-radius:20px;padding:22px 8px;margin:0 0 16px;user-select:all;-webkit-user-select:all}' +
+    'button{width:100%;height:56px;border:0;border-radius:16px;background:#1F6436;color:#fff;font:700 17px system-ui;margin-bottom:18px}.m{color:#5A5F58;font-size:15px}</style>' + тело)
+    .setTitle('РЗДС — код входа')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
 /* -------------------------------------------------------------- меню */
 function Меню_вход_в_приложение() {
   своимиРуками_();
   var r = Прил_выдатьКод_('Павел', 'owner');
   var ui = SpreadsheetApp.getUi();
   ui.alert('Вход в приложение на телефон',
-    'Код владельца: ' + r.code + '\n\nДействует сутки, вводится один раз.\n\n' +
+    'Код владельца: ' + r.code + '\n\nДействует сутки, годится на три входа (например, Safari и иконка).\n\n' +
     '1. Откройте на айфоне в Safari: ' + r.link + '\n' +
     '2. «Поделиться» → «На экран „Домой“».\n' +
     '3. Откройте РЗДС с иконки и введите код.\n\n' +

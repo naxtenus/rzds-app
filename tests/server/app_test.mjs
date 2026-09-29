@@ -84,16 +84,33 @@ check("в меню появился пункт", () => {
   truthy(m.items.some((i) => i.fn === "Меню_вход_в_приложение"), "пункта нет");
 });
 check("неверный код не пускает", () => { const r = post({ a: "login", code: "ZZZZZZ" }); eq(r.error, "Код не подошёл", "ответ"); });
-check("верный код даёт сессию владельца, код сгорает", () => {
+check("верный код даёт сессию владельца", () => {
   const code = j("Прил_выдатьКод_('Павел','owner')").code;
-  const r = post({ a: "login", code: code.toLowerCase(), ua: "iPhone" });
+  const r = post({ a: "login", code: code.toLowerCase(), ua: "iPhone Safari" });
   truthy(r.token && r.token.length >= 64, "нет сессии");
   eq(r.me.role, "owner", "роль");
   OWN = r.token;
-  eq(post({ a: "login", code }).error, "Код не подошёл", "повторный вход тем же кодом");
   const row = j("readTable_('Входы приложения', COL_ПВХ)[1]");
   truthy(String(row['Сессия']).startsWith("h") && !String(row['Сессия']).includes(OWN), "в таблице лежит сама сессия");
-  return "в таблице только отпечаток";
+  /* Safari → иконка «Домой»: тот же код второй и третий раз, каждый вход — своя строка */
+  const r2 = post({ a: "login", code, ua: "iPhone иконка" });
+  truthy(r2.token && r2.token !== OWN, "второй вход тем же кодом не прошёл: " + r2.error);
+  const r3 = post({ a: "login", code, ua: "второй телефон" });
+  truthy(r3.token, "третий вход не прошёл: " + r3.error);
+  eq(post({ a: "load", s: OWN }).me.name, "Павел", "первая сессия жива после второго входа");
+  eq(post({ a: "login", code }).error, "Код не подошёл", "четвёртый вход тем же кодом");
+  const rows = j("readTable_('Входы приложения', COL_ПВХ).filter(function(r){return r['Имя']==='Павел' && r['Сессия']})");
+  truthy(rows.length >= 3, "строк со входами " + rows.length);
+  return "код годится на 3 входа, у каждого своя строка";
+});
+check("код владельца с телефона: страница плана ?appcode=1", () => {
+  const html = run("Прил_кодСтраница_({role:'owner'}).getContent()");
+  const code = (html.match(/id="c">([A-Z2-9]{6})</) || [])[1];
+  truthy(code, "на странице нет кода");
+  truthy(post({ a: "login", code }).token, "код со страницы не пускает");
+  truthy(!run("Прил_кодСтраница_({role:'viewer'}).getContent()").includes('id="c"'), "не владельцу показали код");
+  const link = post({ a: "ownerLink" });
+  truthy(/\?appcode=1$/.test(link.url), "ссылка на страницу кода: " + link.url);
 });
 check("без сессии — отказ с кодом auth", () => { const r = post({ a: "load", s: "чужая" }); eq(r.code, "auth", "код"); });
 check("просроченный код не пускает", () => {
