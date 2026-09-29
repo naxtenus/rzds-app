@@ -261,12 +261,81 @@ function Прил_текстОтметки_(f) {
   return n;
 }
 
-function Прил_вид_(me) {
+/* ------------------------------------------------ план — один раз на версию
+   Журнал выполнения за 28.09 показал, откуда «пять секунд»: каждый запрос
+   приложения — от 4 до 13 секунд на сервере. На каждое нажатие сервер читал
+   весь план из восьми листов и заново прогонял расчёт критического пути.
+
+   Теперь посчитанная часть (операции окна, заказы, станки, люди) лежит в
+   кэше сервера под номером версии плана. Любое сохранение плана — из
+   планировщика, решением по ответу, ночным пересчётом — меняет номер, и
+   следующий запрос посчитает заново. Правка руками прямо в таблице номер не
+   меняет, поэтому срок жизни кэша ограничен пятью минутами: хуже этого
+   старым план в телефоне не будет.
+
+   В кэш не кладётся то, что меняется между сохранениями плана: ответы со
+   смены, задачи, настройки. Их читаем каждый раз — они лёгкие. */
+var ПРИЛ_КЭШ_СЕК = 300;
+function Прил_планЧасть_() {
+  var tz = Session.getScriptTimeZone();
+  var ключ = 'app:plan:v' + planVersion_() + ':' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd');
+  var c = CacheService.getScriptCache();
+  var готово = Прил_кэшВзять_(c, ключ);
+  if (готово) return готово;
+
   var eng = engineNow_();
   var сегодня = new Date(); сегодня.setHours(0, 0, 0, 0);
   /* Окно — вчера и три недели вперёд. Начатое и «есть проблема» видно всегда,
      даже если по плану должно было кончиться раньше: оно и есть самое важное. */
   var от = new Date(сегодня.getTime() - 864e5), до = new Date(сегодня.getTime() + 21 * 864e5);
+  var ops = [];
+  eng.ops.forEach(function (o) {
+    if (o.kind === 'stop' || !o.es || !o.ef) return;
+    var живая = o.status === 'в работе' || o.status === 'есть проблема';
+    if (!живая && (o.ef < от || o.es > до)) return;
+    ops.push({
+      code: o.id, order: o.order, op: o.stage || o.description || o.id, part: o.part || '',
+      res: o.machine || o.worker || '—', machine: o.machine || '', worker: o.worker || '',
+      start: o.es.toISOString(), end: o.ef.toISOString(),
+      status: ПРИЛ_СТАТУС[o.status] || 'план', pct: Math.round(o.progress || 0),
+      factStart: o.factStart ? o.factStart.toISOString() : '', problem: o.problem || '',
+    });
+  });
+  var заказы = Object.keys(eng.orders || {}).map(function (k) {
+    return { code: k, name: eng.orders[k] || '', due: eng.deadlines[k] || '' };
+  });
+  var ресурсы = Object.keys(eng.resources).map(function (k) {
+    var r = eng.resources[k];
+    return { code: r.id, name: r.name, places: r.capacity || 1 };
+  });
+  var рабочие = readTable_(SH.WRK, COL_WRK).filter(function (r) { return bool_(r['Активен']); })
+    .map(function (r) { return { id: s_(r['Имя']), name: s_(r['Имя']), res: parseList_(r['Ресурсы']) }; });
+  var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие };
+  Прил_кэшПоложить_(c, ключ, часть, ПРИЛ_КЭШ_СЕК);
+  return часть;
+}
+
+/* Кэш сервера держит до 100 КБ на ключ; большой план режем на куски. */
+function Прил_кэшПоложить_(c, ключ, объект, сек) {
+  try {
+    var t = JSON.stringify(объект), n = Math.ceil(t.length / 90000) || 1, m = {};
+    for (var i = 0; i < n; i++) m[ключ + ':' + i] = t.slice(i * 90000, (i + 1) * 90000);
+    m[ключ + ':n'] = String(n);
+    if (c.putAll) c.putAll(m, сек); else Object.keys(m).forEach(function (k) { c.put(k, m[k], сек); });
+  } catch (e) { /* не влезло в кэш — ничего страшного, посчитаем в следующий раз */ }
+}
+function Прил_кэшВзять_(c, ключ) {
+  try {
+    var n = Number(c.get(ключ + ':n') || 0);
+    if (!n) return null;
+    var t = '';
+    for (var i = 0; i < n; i++) { var кус = c.get(ключ + ':' + i); if (кус == null) return null; t += кус; }
+    return JSON.parse(t);
+  } catch (e) { return null; }
+}
+
+function Прил_вид_(me) {
+  var часть = Прил_планЧасть_();
   var ждут = pendingFacts_();
   /* Отметки, которые ещё ждут решения мастера, в плане не видны — план
      меняет только он. Но рабочему, нажавшему «Начал», экран обязан показать
@@ -281,50 +350,34 @@ function Прил_вид_(me) {
     if (вид === 'done') { x.done = true; }
     if (вид === 'problem') { x.problem = Прил_текстОтметки_(f); x.problemAt = Прил_iso_(f.ts); }
   });
-  var рабочие = readTable_(SH.WRK, COL_WRK).filter(function (r) { return bool_(r['Активен']); })
-    .map(function (r) { return { id: s_(r['Имя']), name: s_(r['Имя']), res: parseList_(r['Ресурсы']) }; });
   var мои = null;
   if (me.role === 'worker') {
-    var w = рабочие.filter(function (x) { return x.name === me.name; })[0];
+    var w = часть.people.filter(function (x) { return x.name === me.name; })[0];
     мои = w ? w.res : [];
   }
   var ops = [];
-  eng.ops.forEach(function (o) {
-    if (o.kind === 'stop' || !o.es || !o.ef) return;
-    var живая = o.status === 'в работе' || o.status === 'есть проблема';
-    if (!живая && (o.ef < от || o.es > до)) return;
+  часть.ops.forEach(function (o) {
     if (мои && мои.length && мои.indexOf(o.machine) < 0 && мои.indexOf(o.worker) < 0) return;
-    var st = ПРИЛ_СТАТУС[o.status] || 'план';
-    var x = поверх[o.id] || {};
-    var начато = o.factStart ? o.factStart.toISOString() : '';
+    var st = o.status, начато = o.factStart;
+    var x = поверх[o.code] || {};
     if (x.start && st === 'план') { st = 'в работе'; начато = Прил_iso_(x.start); }
     if (x.problem && st !== 'выполнено') st = 'проблема';
     if (x.done && (st === 'в работе' || st === 'план')) st = 'ждёт решения';
     ops.push({
-      code: o.id, order: o.order, op: o.stage || o.description || o.id, part: o.part || '',
-      res: o.machine || o.worker || '—', start: o.es.toISOString(), end: o.ef.toISOString(),
-      status: st, pct: Math.round(o.progress || 0),
-      factStart: начато, problem: x.problem || o.problem || '', problemAt: x.problemAt || '',
+      code: o.code, order: o.order, op: o.op, part: o.part, res: o.res, start: o.start, end: o.end,
+      status: st, pct: o.pct, factStart: начато, problem: x.problem || o.problem || '', problemAt: x.problemAt || '',
       pending: !!(x.start || x.done || x.problem),
     });
-  });
-  var заказы = [];
-  Object.keys(eng.orders || {}).forEach(function (k) {
-    заказы.push({ code: k, name: eng.orders[k] || '', due: eng.deadlines[k] || '' });
   });
   var задачи = Прил_задачиДляВида_();
 
   if (me.role === 'worker') {
     return {
       me: { role: 'worker', name: me.name, id: me.name }, now: new Date().toISOString(),
-      ops: ops, orders: заказы,
+      ops: ops, orders: часть.orders,
       tasks: задачи.filter(function (t) { return t.to === me.name; }),
     };
   }
-  var ресурсы = Object.keys(eng.resources).map(function (k) {
-    var r = eng.resources[k];
-    return { code: r.id, name: r.name, places: r.capacity || 1 };
-  });
   var pending = ждут.slice().reverse().map(function (f) {
     var вид = Прил_видОтметки_(f);
     var imp = ПРИЛ_ПОСЛЕДСТВИЯ[вид];
@@ -334,7 +387,7 @@ function Прил_вид_(me) {
   });
   return {
     me: { role: 'owner', name: me.name, id: 'owner' }, now: new Date().toISOString(),
-    people: рабочие, resources: ресурсы, orders: заказы, ops: ops,
+    people: часть.people, resources: часть.resources, orders: часть.orders, ops: ops,
     pending: pending, decided: Прил_решённые_(12), tasks: задачи,
     settings: Прил_настройкиВсе_(),
   };

@@ -321,6 +321,26 @@ check("задачи видны и в планировщике (тот же ли�
   truthy(t.some((x) => x.text === "Подготовить заготовки"), "нет в листе");
 });
 
+console.log("\n6. Скорость: план из кэша");
+check("второй запрос не пересчитывает план", () => {
+  run("var __счётДвижка = 0; var __старыйДвижок = engineNow_; engineNow_ = function(){ __счётДвижка++; return __старыйДвижок(); };");
+  run("CacheService.getScriptCache().remove && Object.keys({}).length");
+  const v = j("planVersion_()");
+  run(`props_().setProperty('PLAN_VERSION', String(${v} + 1000))`);   // новая версия — чистый кэш
+  post({ a: "load", s: OWN }); post({ a: "load", s: OWN }); post({ a: "load", s: WRK });
+  eq(j("__счётДвижка"), 1, "пересчётов на три запроса");
+  run(`props_().setProperty('PLAN_VERSION', String(${v} + 1001))`);    // план сохранили — пересчёт
+  post({ a: "load", s: OWN });
+  eq(j("__счётДвижка"), 2, "после смены версии");
+  run("engineNow_ = __старыйДвижок;");
+  return "3 запроса — 1 расчёт; новая версия плана — новый расчёт";
+});
+check("рабочий по-прежнему видит только свои станки", () => {
+  const w = post({ a: "load", s: WRK });
+  truthy(Array.isArray(w.ops), "нет операций");
+  truthy(!w.people && !w.pending, "рабочему ушли чужие данные");
+});
+
 console.log("\n6. Прочее");
 check("старый путь бота не сломан: POST без app и без секрета — «ok»", () => {
   ctx.__body = "{}";
