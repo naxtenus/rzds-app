@@ -215,6 +215,12 @@ export const demo = {
       case 'pushKey': out = { key: '' }; break;
       case 'pushSubscribe': out = { ok: true }; break;
       case 'reset': db = seed(); out = view(me); break;
+      case 'flush': case 'ack': out = { ok: true }; break;
+      case 'sessions': out = { sessions: db.sessions || (db.sessions = [
+        { row: 2, name: 'Павел', role: 'owner', device: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari', since: new Date(Date.now() - 12 * 864e5).toISOString(), seen: new Date().toISOString(), active: true, me: me.role === 'owner' },
+        { row: 3, name: 'Оператор фре1360', role: 'worker', device: 'Mozilla/5.0 (Linux; Android 14) Chrome/128', since: new Date(Date.now() - 5 * 864e5).toISOString(), seen: new Date(Date.now() - 3 * 36e5).toISOString(), active: true, me: me.role === 'worker' },
+      ]).filter((x) => me.role === 'owner' || x.name === me.name) }; break;
+      case 'revoke': { const x = (db.sessions || []).find((y) => y.row === Number(p.row)); if (x) x.active = false; out = { sessions: (db.sessions || []).filter((y) => me.role === 'owner' || y.name === me.name) }; break; }
       default: throw new Error('Неизвестное действие: ' + action);
     }
     save(db);

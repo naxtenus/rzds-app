@@ -22,7 +22,10 @@ export const deliveryState = (t) => {
   if (d.taken) return { text: 'В работе', color: '#1F6436' };
   if (d.read) return { text: 'Прочитал', color: '#5A5F58' };
   if (d.delivered) return { text: 'Не прочитал', color: '#9A5B12' };
-  return { text: 'Отправляется', color: '#5A5F58' };
+  /* «Доставлено» ставит сам телефон исполнителя, получив уведомление.
+     Нет подтверждения десять минут — повод позвонить. */
+  if (d.sent && Date.now() - new Date(d.sent) > 10 * 6e4) return { text: 'Не дошло?', color: '#9A5B12' };
+  return { text: 'Отправлено', color: '#5A5F58' };
 };
 
 export const opLook = {

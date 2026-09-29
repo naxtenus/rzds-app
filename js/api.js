@@ -33,10 +33,20 @@ const live = {
         redirect: 'follow',
       });
     } catch (e) {
-      throw new Error(e.name === 'AbortError' ? 'Сервер не ответил за 25 секунд' : 'Нет связи с сервером');
+      /* net — связи нет или ответ потерялся: такое нажатие можно отложить
+         и отправить ещё раз (сервер узнает повтор по cid). */
+      const err = new Error(e.name === 'AbortError' ? 'Сервер не ответил за 25 секунд' : 'Нет связи с сервером');
+      err.net = true;
+      throw err;
     } finally { clearTimeout(timer); }
     let data;
-    try { data = await res.json(); } catch (e) { throw new Error('Сервер ответил непонятно (' + res.status + ')'); }
+    try { data = await res.json(); } catch (e) {
+      /* Google иногда отвечает страницей «сервис недоступен» — это тоже
+         «попробовать позже», а не отказ по существу. */
+      const err = new Error('Сервер ответил непонятно (' + res.status + ')');
+      err.net = true;
+      throw err;
+    }
     if (data && data.error) {
       const err = new Error(data.error);
       err.code = data.code || '';
@@ -55,4 +65,19 @@ export const backend = () => {
   return hasServer() ? live : demo;
 };
 
-export const api = (action, payload) => backend().call(action, payload, session.get() || {});
+/* Номер телефона для предела попыток входа: у каждого телефона свой
+   счётчик, и чужие ошибки не запирают вход остальным. */
+export const deviceId = () => {
+  try {
+    let d = localStorage.getItem('rzds-dev');
+    if (!d) { d = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('rzds-dev', d); }
+    return d;
+  } catch (e) { return ''; }
+};
+
+export const api = (action, payload) => backend().call(action,
+  action === 'login' ? Object.assign({ dev: deviceId() }, payload) : payload, session.get() || {});
+
+/* Разослать уведомления, которые сервер поставил в очередь, — отдельным
+   запросом, не задерживая ответ на нажатие. Ждать его незачем. */
+export const flush = () => { api('flush').catch(() => {}); };

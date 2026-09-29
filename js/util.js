@@ -95,6 +95,7 @@ export const icon = {
   back: (w) => I('<path d="M15 18l-6-6 6-6"/>', w, 'stroke-width="2.4"'),
   next: (w) => I('<path d="M9 18l6-6-6-6"/>', w, 'stroke-width="2.4"'),
   close: (w) => I('<path d="M6 6l12 12M18 6L6 18"/>', w, 'stroke-width="2.4"'),
+  phone: (w) => I('<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>', w),
   clock: (w) => I('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', w),
   alert: (w) => I('<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>', w),
   play: (w) => `<svg width="${w || 24}" height="${w || 24}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>`,

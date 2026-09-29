@@ -311,3 +311,23 @@ button.kv { font: inherit; color: inherit; cursor: pointer; }
 .task.flash { animation: flash 2.4s ease-out; }
 @keyframes flash { 0%, 30% { background: var(--green-l); } 100% { background: transparent; } }
 .toast { animation: down .18s ease-out; z-index: 60; }
+
+/* ------------------------------------------ «Исходящие» и входы (волна 1) */
+.toast.queued { background: var(--bronze-dd); }
+.outbox-chip { position: fixed; top: calc(var(--top) + 8px); left: 50%; transform: translateX(-50%); z-index: 40;
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: none; border-radius: 999px;
+  background: var(--bronze-l); color: var(--bronze-dd); font: 700 14px/1 inherit; font-family: inherit;
+  box-shadow: 0 4px 14px rgba(90, 57, 31, .22); cursor: pointer; }
+.outbox-chip .spinner { width: 14px; height: 14px; border-width: 2px; }
+.ob-back { position: fixed; inset: 0; z-index: 44; background: rgba(27, 31, 28, .35); }
+.ob-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; max-height: 80vh; overflow: auto;
+  background: var(--bg); border-radius: 24px 24px 0 0; padding: 18px 18px calc(var(--bottom) + 18px);
+  display: flex; flex-direction: column; gap: 12px; box-shadow: 0 -8px 30px rgba(0,0,0,.2); animation: up .2s ease-out; }
+.ob-item { display: flex; gap: 10px; align-items: center; padding: 12px 14px; }
+.task.saving.queued { opacity: 1; background: var(--bronze-l); }
+.task.saving.queued .check { color: var(--bronze-d); display: flex; align-items: center; justify-content: center; }
+.sess { display: flex; gap: 12px; align-items: center; padding: 14px; }
+.sess .ic { width: 40px; height: 40px; border-radius: 12px; background: var(--bg2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--ink2, #3A3F3A); }
+.sess.off { opacity: .55; }
+.sess .me { color: var(--green); font-weight: 700; }
+.has-ob .toast { top: calc(var(--top) + 52px); }

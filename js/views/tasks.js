@@ -12,11 +12,11 @@ export function taskRow(d, t) {
   const del = t.to ? deliveryState(t) : null;
   const n = (t.comments || []).length;
   if (t.saving || t.n < 0) {
-    return `<div class="task saving" aria-busy="true" id="task-saving">
-    <span class="check"><i class="spinner" aria-hidden="true"></i></span>
+    return `<div class="task saving${t.queued ? ' queued' : ''}" aria-busy="${!t.queued}" id="task-saving">
+    <span class="check">${t.queued ? icon.clock(18) : '<i class="spinner" aria-hidden="true"></i>'}</span>
     <div class="body"><span class="text">${esc(t.text)}</span>
       <span class="meta">${t.to ? `<span class="who">${avatar(personName(d, t.to))}${esc(personName(d, t.to))}</span>` : ''}
-        <span class="strong" style="color:var(--green)">${t.to ? 'отправляю…' : 'сохраняю…'}</span></span></div>
+        <span class="strong" style="color:${t.queued ? 'var(--bronze-d, #8A5A34)' : 'var(--green)'}">${t.queued ? 'ждёт отправки — нет связи' : t.to ? 'отправляю…' : 'сохраняю…'}</span></span></div>
   </div>`;
   }
   return `<div class="task${t.state === 'закрыта' ? ' is-done' : ''}${store.ui.flash === t.n ? ' flash' : ''}" id="task-${t.n}">

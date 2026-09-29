@@ -5,34 +5,66 @@
    сюда POST-запросами на АНОНИМНЫЙ адрес — тот же, что у быстрого бота:
    установленное на айфон веб-приложение не умеет входить в Google.
 
-   Замок вместо Google-входа — сессия. Её выдают в обмен на одноразовый код,
-   который владелец получает из меню таблицы («Вход в приложение на телефон»)
-   или выдаёт рабочему из самого приложения. Код живёт сутки и сгорает при
-   первом входе. В таблице хранится не сама сессия, а её отпечаток (SHA-256):
-   утечка листа «Входы приложения» не даёт никому войти. Любой вход можно
-   выключить — «Активен» = нет.
+   Замок вместо Google-входа — сессия. Её выдают в обмен на код, который
+   владелец получает из меню таблицы («Вход в приложение на телефон»), со
+   страницы плана (…/exec?appcode=1) или выдаёт рабочему из самого
+   приложения. Код живёт сутки и годится на три входа. В таблице хранится не
+   сама сессия, а её отпечаток (SHA-256): утечка листа «Входы приложения» не
+   даёт никому войти. Любой вход можно выключить — из приложения («Мои
+   входы») или в листе («Активен» = нет). Вход, которым не пользовались 90
+   дней, выключается сам.
 
    Всё, что здесь есть, кончается подчёркиванием: такие функции со страницы
-   плана через google.script.run недосягаемы. Открыты только пункты меню, и
-   те — за калиткой своимиРуками_().
+   плана через google.script.run недосягаемы. Открыты только пункты меню и
+   триггер, и те безвредны или за калиткой своимиРуками_().
 
    Листы, которые заводит приложение (руками их трогать не нужно):
      «Входы приложения» — кто вошёл с какого телефона;
      «Push-подписки»    — куда слать уведомления;
      «Поручения»        — кому поручена задача и дошла ли она.
+
+   Волна 1 (30.09.2026) — надёжность и скорость:
+     — все листы читаются по одному обращению, свойства — одним;
+     — push и Телеграм не держат ответ: они встают в очередь, телефон
+       сразу после ответа просит «разошли» (a: 'flush'), а если не попросил —
+       очередь разберёт триггер «Триггер_приложение» раз в пять минут;
+     — телефон подтверждает, что push дошёл (a: 'ack'); не подтвердил за
+       10 минут — владельцу сообщение в Телеграм;
+     — утренняя сводка, «за час до срока», повтор непрочитанного поручения,
+       «отчитаться» в конце смены, недельный отчёт — тем же триггером;
+     — повтор одного и того же нажатия (связь оборвалась, телефон отправил
+       ещё раз) не делает дела дважды: у каждого нажатия свой номер (cid).
    ========================================================================= */
 
 var ПРИЛ = { ВХОД: 'Входы приложения', ПУШ: 'Push-подписки', ПОРУЧ: 'Поручения' };
 var COL_ПВХ = ['Имя', 'Роль', 'Код', 'Код до', 'Сессия', 'Устройство', 'Вошёл', 'Был', 'Активен'];
 var COL_ППУШ = ['Кто', 'Адрес', 'Ключи', 'Устройство', 'Добавлена', 'Ошибка'];
-var COL_ППОР = ['Номер задачи', 'Кому', 'Заказ', 'Отправлено', 'Доставлено', 'Прочитано', 'Взял'];
+var COL_ППОР = ['Номер задачи', 'Кому', 'Заказ', 'Отправлено', 'Доставлено', 'Прочитано', 'Взял', 'Срок время'];
 var ПРИЛ_АДРЕС = 'https://naxtenus.github.io/rzds-app/';
 var ПРИЛ_ВЛАДЕЛЕЦ = 'владелец';
-var ПРИЛ_ВХОДОВ = 3;        // на сколько телефонов (или Safari + иконка) годится один код
+var ПРИЛ_ВХОДОВ = 3;          // на сколько телефонов (или Safari + иконка) годится один код
+var ПРИЛ_ДНЕЙ_ВХОДА = 90;     // вход, которым не пользовались столько дней, выключается
+var ПРИЛ_ПРАВКИ = { decide: 1, undecide: 1, mark: 1, taskSave: 1, taskUpdate: 1, taskComment: 1,
+  taskRead: 1, settingsSave: 1 };
+
+/* ------------------------------------------------ память одного запроса
+   Всё, что прочитано за запрос, живёт здесь и выбрасывается в конце.
+   отложить — push и Телеграм не слать сейчас, а поставить в очередь. */
+var __прил = null;
+function Прил_забыть_() { if (__прил) { __прил.св = null; __прил.листы = {}; } }
+
+/* Все свойства скрипта одним обращением. */
+function Прил_св_() {
+  if (__прил && __прил.св) return __прил.св;
+  var св = props_().getProperties();
+  if (__прил) __прил.св = св;
+  return св;
+}
 
 /* ----------------------------------------------------------- вход в сеть */
 function Прил_doPost_(e) {
-  var out;
+  __прил = { отложить: true, очередь: [], листы: {} };
+  var t0 = Date.now(), out;
   try {
     var сырьё = (e && e.postData && e.postData.contents) || '';
     var p = JSON.parse(сырьё || '{}');
@@ -40,6 +72,11 @@ function Прил_doPost_(e) {
   } catch (err) {
     out = { error: String(err && err.message || err), code: err && err.code || '' };
   }
+  try {
+    if (__прил.очередь.length) { Прил_вОчередь_(__прил.очередь); out.flush = true; }
+  } catch (err) { Logger.log('очередь уведомлений: %s', err); }
+  out.ms = Date.now() - t0;
+  __прил = null;
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -51,23 +88,53 @@ function Прил_действие_(a, p) {
      выдаёт его сама. Адрес плана и так защищён Google-входом — отдать его
      без сессии безопасно, а зашивать в приложение незачем. */
   if (a === 'ownerLink') return { url: webAppUrl_() + '?appcode=1' };
+  /* Подтверждение доставки приходит от самого телефона (служебный
+     работник), у которого нет сессии. Номер уведомления случайный и
+     одноразовый — знать его может только тот, кому оно пришло. */
+  if (a === 'ack') return Прил_получено_(p.id);
   var me = Прил_кто_(p.s);
   var вл = me.role === 'owner';
+
+  /* Повтор того же нажатия: связь оборвалась после записи, телефон
+     отправил ещё раз. Второй раз не делаем — только отдаём свежий вид. */
+  var cidKey = ПРИЛ_ПРАВКИ[a] && s_(p.cid) ? 'app:cid:' + s_(p.cid).replace(/[^\w-]/g, '').slice(0, 40) : '';
+  if (cidKey) {
+    var было = CacheService.getScriptCache().get(cidKey);
+    if (было) {
+      var v0 = Прил_вид_(me);
+      try { var x = JSON.parse(было); if (x.created) v0.created = x.created; } catch (e) {}
+      v0.repeat = true;
+      return v0;
+    }
+  }
+  var сделано = function (created) {
+    if (cidKey) CacheService.getScriptCache().put(cidKey, JSON.stringify({ created: created || 0 }), 21600);
+    Прил_забыть_();
+    var v = Прил_вид_(me);
+    if (created) v.created = created;
+    return v;
+  };
+
   switch (a) {
-    case 'load': return Прил_вид_(me);
-    case 'decide': if (!вл) break; Прил_решить_(Number(String(p.id).replace(/^f/, '')), !!p.yes, me.name); return Прил_вид_(me);
-    case 'undecide': if (!вл) break; Прил_отменить_(Number(String(p.id).replace(/^f/, ''))); return Прил_вид_(me);
-    case 'mark': Прил_отметка_(me, s_(p.op), s_(p.what), s_(p.text)); return Прил_вид_(me);
-    case 'taskSave': if (!вл) break; var r = Прил_задача_(me, p.task || {}); var v = Прил_вид_(me); v.created = r; return v;
-    case 'taskUpdate': Прил_задачаПравка_(me, p); return Прил_вид_(me);
-    case 'taskComment': Прил_задачаСлово_(me, Number(p.n), s_(p.text)); return Прил_вид_(me);
-    case 'taskRead': Прил_прочитал_(me, Number(p.n)); return Прил_вид_(me);
-    case 'settingsSave': if (!вл) break; Прил_настройки_(p.settings || {}); return Прил_вид_(me);
+    case 'load':
+      if (вл && !Прил_св_().APP_CLOCK) { try { Прил_часыЗавести_(); } catch (e) { Logger.log('часы приложения: %s', e); } }
+      return Прил_вид_(me);
+    case 'decide': if (!вл) break; Прил_решить_(Number(String(p.id).replace(/^f/, '')), !!p.yes, me.name); return сделано();
+    case 'undecide': if (!вл) break; Прил_отменить_(Number(String(p.id).replace(/^f/, ''))); return сделано();
+    case 'mark': Прил_отметка_(me, s_(p.op), s_(p.what), s_(p.text)); return сделано();
+    case 'taskSave': if (!вл) break; return сделано(Прил_задача_(me, p.task || {}));
+    case 'taskUpdate': Прил_задачаПравка_(me, p); return сделано();
+    case 'taskComment': Прил_задачаСлово_(me, Number(p.n), s_(p.text)); return сделано();
+    case 'taskRead': Прил_прочитал_(me, Number(p.n)); return сделано();
+    case 'settingsSave': if (!вл) break; Прил_настройки_(p.settings || {}); return сделано();
     case 'issueCode': if (!вл) break; return Прил_выдатьКод_(s_(p.name), s_(p.role) === 'owner' ? 'owner' : 'worker');
+    case 'sessions': return { sessions: Прил_входы_(me) };
+    case 'revoke': Прил_отключить_(me, Number(p.row)); return { sessions: Прил_входы_(me) };
+    case 'flush': __прил.отложить = false; return { ok: true, sent: Прил_разослать_() };
     case 'pushKey': return { key: ВебПуш_публичный_() };
     case 'pushSubscribe': Прил_подписка_(me, p.sub || {}, s_(p.ua)); return { ok: true };
     case 'pushTest':
-      var n = Прил_пуш_(Прил_кому_(me), { title: 'РЗДС: проверка', body: 'Уведомления на этот телефон доходят.', url: '#/', tag: 'test' }, null, true);
+      var n = Прил_пушСейчас_(Прил_кому_(me), { title: 'РЗДС: проверка', body: 'Уведомления на этот телефон доходят.', url: '#/', tag: 'test' }, null, true);
       if (!n) throw Прил_ошибка_('Не дошло: подписки нет или телефон её отклонил. Нажмите «Включить уведомления» ещё раз.');
       return { ok: true, sent: n };
     default: throw Прил_ошибка_('Неизвестное действие: ' + a);
@@ -91,6 +158,7 @@ function Прил_хэш_(t) {
     .map(function (x) { return ('0' + ((x + 256) % 256).toString(16)).slice(-2); }).join('');
 }
 function Прил_сейчас_() { return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy HH:mm'); }
+function Прил_чч_(d) { return Utilities.formatDate(d instanceof Date ? d : new Date(d), Session.getScriptTimeZone(), 'HH:mm'); }
 
 /* Выдать код. Одна строка — один телефон: второй телефон того же человека
    получает свою строку, и отключить можно ровно его. */
@@ -114,11 +182,18 @@ function Прил_выдатьКод_(имя, роль) {
 function Прил_вход_(p) {
   var код = s_(p.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (код.length < 6) throw Прил_ошибка_('Введите код целиком — шесть знаков');
-  /* Перебор кодов: не больше 20 попыток за 10 минут на весь сервер. */
+  /* Перебор кодов. Раньше предел был один на весь сервер — 20 попыток за
+     10 минут, и кто-то один, ошибаясь, запирал вход всем. Теперь предел у
+     каждого телефона свой (10 попыток), а общий (100) только страхует от
+     перебора с множества «телефонов»: 100 попыток из 887 млн сочетаний. */
   var c = CacheService.getScriptCache();
-  var попыток = Number(c.get('app:login') || 0);
-  if (попыток > 20) throw Прил_ошибка_('Слишком много попыток. Подождите 10 минут.');
-  c.put('app:login', String(попыток + 1), 600);
+  var dev = s_(p.dev).replace(/[^\w-]/g, '').slice(0, 40) || 'без-номера';
+  var кд = 'app:login:' + dev, кв = 'app:login:all';
+  var nd = Number(c.get(кд) || 0), nv = Number(c.get(кв) || 0);
+  if (nd >= 10) throw Прил_ошибка_('С этого телефона слишком много попыток. Подождите 10 минут.');
+  if (nv >= 100) throw Прил_ошибка_('Слишком много попыток входа. Подождите 10 минут.');
+  c.put(кд, String(nd + 1), 600);
+  c.put(кв, String(nv + 1), 600);
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw Прил_ошибка_('Сервер занят, попробуйте ещё раз');
   try {
@@ -135,9 +210,8 @@ function Прил_вход_(p) {
       /* Код годится на ПРИЛ_ВХОДОВ входов за сутки, а не на один. Живой
          случай (29.09): владелец ввёл код в Safari, потом добавил приложение
          на экран «Домой» — а у приложения с иконки своя память, и там снова
-         экран входа. Второй раз код уже не подходил, а взять новый с
-         телефона было негде. Каждый вход — своя строка и своя сессия, так
-         что отключить можно ровно один телефон. */
+         экран входа. Каждый вход — своя строка и своя сессия, так что
+         отключить можно ровно один телефон. */
       var сч = 'app:uses:' + код;
       var было = Number(props_().getProperty(сч) || 0) + 1;
       var строка = [Прил_хэш_(сессия), s_(p.ua).slice(0, 120), Прил_сейчас_(), Прил_сейчас_()];
@@ -153,6 +227,7 @@ function Прил_вход_(p) {
         sh.getRange(i + 2, 3, 1, 2).setValues([['', '']]);   // код израсходован
         props_().deleteProperty(сч);
       } else props_().setProperty(сч, String(было));
+      c.remove(кд);
       var роль = s_(r[1]) === ПРИЛ_ВЛАДЕЛЕЦ ? 'owner' : 'worker';
       return { token: сессия, me: { role: роль, name: s_(r[0]), id: роль === 'owner' ? 'owner' : s_(r[0]) } };
     }
@@ -162,7 +237,8 @@ function Прил_вход_(p) {
 
 /* Кто пришёл. Отпечаток сессии ищем в листе; результат — в кэше на 10 минут,
    чтобы не читать лист на каждое нажатие. Выключенный вход перестаёт
-   работать не позже чем через 10 минут. */
+   работать сразу, если выключен из приложения, и не позже чем через 10
+   минут, если руками в листе. */
 function Прил_кто_(сессия) {
   if (!s_(сессия)) throw Прил_ошибка_('Нужно войти', 'auth');
   var h = Прил_хэш_(сессия);
@@ -175,13 +251,46 @@ function Прил_кто_(сессия) {
   for (var i = 0; i < rows.length; i++) {
     if (s_(rows[i][4]) !== h) continue;
     if (!bool_(rows[i][8])) throw Прил_ошибка_('Вход на этом телефоне выключен', 'auth');
+    /* Телефон потерян или отдан — а вход в нём жив годами. Не заходили
+       ПРИЛ_ДНЕЙ_ВХОДА дней — вход выключается, нужен новый код. */
+    var был = Прил_дата_(rows[i][7]) || Прил_дата_(rows[i][6]);
+    if (был && Date.now() - был.getTime() > ПРИЛ_ДНЕЙ_ВХОДА * 864e5) {
+      try { sh.getRange(i + 2, 9).setValue('нет'); } catch (e) {}
+      throw Прил_ошибка_('Вход устарел: больше ' + ПРИЛ_ДНЕЙ_ВХОДА + ' дней без захода. Попросите новый код.', 'auth');
+    }
     var роль = s_(rows[i][1]) === ПРИЛ_ВЛАДЕЛЕЦ ? 'owner' : 'worker';
-    var me = { role: роль, name: s_(rows[i][0]), id: роль === 'owner' ? 'owner' : s_(rows[i][0]), row: i + 2 };
+    var me = { role: роль, name: s_(rows[i][0]), id: роль === 'owner' ? 'owner' : s_(rows[i][0]), row: i + 2, h: h };
     try { sh.getRange(i + 2, 8).setValue(Прил_сейчас_()); } catch (e) {}
     c.put('app:s:' + h, JSON.stringify(me), 600);
     return me;
   }
   throw Прил_ошибка_('Вход не найден — войдите заново', 'auth');
+}
+
+/* «Мои входы»: владелец видит все телефоны, рабочий — свои. */
+function Прил_входы_(me) {
+  var sh = sheet_(ПРИЛ.ВХОД, COL_ПВХ);
+  var last = sh.getLastRow();
+  var rows = last > 1 ? sh.getRange(2, 1, last - 1, COL_ПВХ.length).getValues() : [];
+  var out = [];
+  rows.forEach(function (r, i) {
+    if (!s_(r[4])) return;                                   // код без входа
+    if (me.role !== 'owner' && s_(r[0]) !== me.name) return;
+    out.push({ row: i + 2, name: s_(r[0]), role: s_(r[1]) === ПРИЛ_ВЛАДЕЛЕЦ ? 'owner' : 'worker',
+      device: s_(r[5]), since: Прил_iso_(r[6]), seen: Прил_iso_(r[7]), active: bool_(r[8]),
+      me: (me.h && s_(r[4]) === me.h) || (!me.h && me.row === i + 2) });
+  });
+  out.sort(function (a, b) { return (b.active - a.active) || String(b.seen).localeCompare(String(a.seen)); });
+  return out;
+}
+function Прил_отключить_(me, row) {
+  var sh = sheet_(ПРИЛ.ВХОД, COL_ПВХ);
+  if (!(row > 1) || row > sh.getLastRow()) throw Прил_ошибка_('Этого входа уже нет в листе');
+  var r = sh.getRange(row, 1, 1, COL_ПВХ.length).getValues()[0];
+  if (!s_(r[4])) throw Прил_ошибка_('Это не вход, а невыданный код');
+  if (me.role !== 'owner' && s_(r[0]) !== me.name) throw Прил_ошибка_('Это не ваш вход');
+  sh.getRange(row, 9).setValue('нет');
+  CacheService.getScriptCache().remove('app:s:' + s_(r[4]));
 }
 
 /* ---------------------------------------------------------------- данные */
@@ -196,14 +305,18 @@ function Прил_iso_(v) {
   if (m) return Utilities.parseDate(t.replace('T', ' '), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm').toISOString();
   return t;
 }
+function Прил_дата_(v) {
+  var t = Прил_iso_(v);
+  if (!t) return null;
+  var d = new Date(t);
+  return isNaN(d) ? null : d;
+}
 
 var ПРИЛ_СТАТУС = { 'в работе': 'в работе', 'есть проблема': 'проблема', 'завершено': 'выполнено',
   'приостановлено': 'пауза', 'не начато': 'план', 'просрочено': 'план' };
 
 function Прил_настройкиВсе_() {
-  var s = {};
-  try { s = JSON.parse(props_().getProperty('APP_SETTINGS') || '{}'); } catch (e) { s = {}; }
-  return s;
+  try { return JSON.parse(Прил_св_().APP_SETTINGS || '{}') || {}; } catch (e) { return {}; }
 }
 function Прил_настройки_(patch) {
   var s = Прил_настройкиВсе_();
@@ -211,29 +324,73 @@ function Прил_настройки_(patch) {
   props_().setProperty('APP_SETTINGS', JSON.stringify(s));
 }
 
+/* Лист целиком одним обращением. Прежде каждый лист читался пятью-шестью
+   (последняя строка, ширина, шапка, строки…), а на один ответ приложения
+   шло четыре листа — это и были секунды. */
+var ПРИЛ_ЛИСТЫ = {
+  факт: function () { return [SH.FACT, COL_FACT]; },
+  задачи: function () { return [SH.TASK, COL_TASK]; },
+  комм: function () { return [SH.TCOM, COL_TCOM]; },
+  пор: function () { return [ПРИЛ.ПОРУЧ, COL_ППОР]; },
+};
+function Прил_лист_(ключ) {
+  var м = __прил && __прил.листы;
+  if (м && м[ключ]) return м[ключ];
+  var имя = ПРИЛ_ЛИСТЫ[ключ]()[0], cols = ПРИЛ_ЛИСТЫ[ключ]()[1];
+  var sh = ss_().getSheetByName(имя);
+  var v = sh ? sh.getDataRange().getValues() : [];
+  var шапка = v.length ? v[0].map(function (h) { return String(h || '').trim(); }) : cols.slice();
+  var строки = v.length > 1 ? v.slice(1) : [];
+  var т = {
+    шапка: шапка, строки: строки,
+    объекты: function () {
+      return строки.map(function (row) {
+        var o = {};
+        шапка.forEach(function (h, i) { if (h) o[h] = row[i]; });
+        return o;
+      }).filter(function (o) { return s_(o[cols[0]]) !== ''; });
+    },
+  };
+  if (м) м[ключ] = т;
+  return т;
+}
+
 function Прил_поручения_() {
   var по = {};
-  readTable_(ПРИЛ.ПОРУЧ, COL_ППОР).forEach(function (r) {
+  Прил_лист_('пор').объекты().forEach(function (r) {
     var n = n_(r['Номер задачи'], 0);
     if (!n) return;
-    по[n] = { to: s_(r['Кому']), order: s_(r['Заказ']),
+    по[n] = { to: s_(r['Кому']), order: s_(r['Заказ']), time: Прил_времяКлетки_(r['Срок время']),
       delivery: { sent: Прил_iso_(r['Отправлено']), delivered: Прил_iso_(r['Доставлено']),
                   read: Прил_iso_(r['Прочитано']), taken: Прил_iso_(r['Взял']) } };
   });
   return по;
 }
+/* «17:00» таблица хранит как дату 30.12.1899 17:00 — достаём часы. */
+function Прил_времяКлетки_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'HH:mm');
+  var m = s_(v).match(/^(\d{1,2}):(\d{2})/);
+  return m ? pad2_(m[1]) + ':' + m[2] : '';
+}
 
 function Прил_задачиДляВида_() {
   var пор = Прил_поручения_();
-  return задачи_(false).map(function (t) {
-    var x = пор[t.n] || {};
-    return {
-      n: t.n, text: t.text, detail: t.detail, weight: t.weight, due: t.due || '',
-      state: t.state, to: x.to || '', order: x.order || '',
-      delivery: x.to ? x.delivery : undefined, closed: Прил_iso_(t.closed), by: t.by,
-      comments: (t.comments || []).map(function (c) { return { ts: Прил_iso_(c.ts), who: c.who, text: c.text }; }),
-    };
+  var комм = {};
+  Прил_лист_('комм').объекты().forEach(function (r) {
+    var n = n_(r['Номер задачи'], 0);
+    if (n) (комм[n] = комм[n] || []).push({ ts: Прил_iso_(датаКлетки_(r['Время'])), who: s_(r['Кто']), text: s_(r['Комментарий']) });
   });
+  return Прил_лист_('задачи').объекты().map(function (r) {
+    var n = n_(r['Номер'], 0), x = пор[n] || {};
+    var день = d_(r['Срок']) || '';
+    return {
+      n: n, text: s_(r['Задача']), detail: s_(r['Подробно']), weight: s_(r['Важность']) || 'обычная',
+      due: день && x.time ? Прил_iso_(день + 'T' + x.time) : день,
+      state: s_(r['Статус']) || ЗАДАЧА_ОТКР, to: x.to || '', order: x.order || '',
+      delivery: x.to ? x.delivery : undefined, closed: Прил_iso_(датаКлетки_(r['Закрыта'])), by: s_(r['Кто закрыл']),
+      comments: комм[n] || [],
+    };
+  }).filter(function (t) { return t.n && t.state !== ЗАДАЧА_УБР; });
 }
 
 function Прил_видОтметки_(f) {
@@ -277,11 +434,12 @@ function Прил_текстОтметки_(f) {
    смены, задачи, настройки. Их читаем каждый раз — они лёгкие. */
 var ПРИЛ_КЭШ_СЕК = 300;
 function Прил_планЧасть_() {
+  if (__прил && __прил.план) return __прил.план;
   var tz = Session.getScriptTimeZone();
-  var ключ = 'app:plan:v' + planVersion_() + ':' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd');
+  var ключ = 'app:plan:v' + Number(Прил_св_().PLAN_VERSION || 0) + ':' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd');
   var c = CacheService.getScriptCache();
   var готово = Прил_кэшВзять_(c, ключ);
-  if (готово) return готово;
+  if (готово) { if (__прил) __прил.план = готово; return готово; }
 
   var eng = engineNow_();
   var сегодня = new Date(); сегодня.setHours(0, 0, 0, 0);
@@ -312,6 +470,7 @@ function Прил_планЧасть_() {
     .map(function (r) { return { id: s_(r['Имя']), name: s_(r['Имя']), res: parseList_(r['Ресурсы']) }; });
   var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие };
   Прил_кэшПоложить_(c, ключ, часть, ПРИЛ_КЭШ_СЕК);
+  if (__прил) __прил.план = часть;
   return часть;
 }
 
@@ -328,15 +487,23 @@ function Прил_кэшВзять_(c, ключ) {
   try {
     var n = Number(c.get(ключ + ':n') || 0);
     if (!n) return null;
+    var ключи = [];
+    for (var i = 0; i < n; i++) ключи.push(ключ + ':' + i);
+    var все = c.getAll ? c.getAll(ключи) : null;
     var t = '';
-    for (var i = 0; i < n; i++) { var кус = c.get(ключ + ':' + i); if (кус == null) return null; t += кус; }
+    for (var j = 0; j < n; j++) {
+      var кус = все ? все[ключи[j]] : c.get(ключи[j]);
+      if (кус == null) return null;
+      t += кус;
+    }
     return JSON.parse(t);
   } catch (e) { return null; }
 }
 
 function Прил_вид_(me) {
   var часть = Прил_планЧасть_();
-  var ждут = pendingFacts_();
+  var фактСтроки = Прил_лист_('факт').строки;
+  var ждут = изСтрок_(фактСтроки);
   /* Отметки, которые ещё ждут решения мастера, в плане не видны — план
      меняет только он. Но рабочему, нажавшему «Начал», экран обязан показать
      «в работе», а не снова «Начал»: иначе он нажмёт второй раз и решит, что
@@ -350,11 +517,7 @@ function Прил_вид_(me) {
     if (вид === 'done') { x.done = true; }
     if (вид === 'problem') { x.problem = Прил_текстОтметки_(f); x.problemAt = Прил_iso_(f.ts); }
   });
-  var мои = null;
-  if (me.role === 'worker') {
-    var w = часть.people.filter(function (x) { return x.name === me.name; })[0];
-    мои = w ? w.res : [];
-  }
+  var мои = Прил_мойУчасток_(me, часть);
   var ops = [];
   часть.ops.forEach(function (o) {
     if (мои && мои.length && мои.indexOf(o.machine) < 0 && мои.indexOf(o.worker) < 0) return;
@@ -388,24 +551,27 @@ function Прил_вид_(me) {
   return {
     me: { role: 'owner', name: me.name, id: 'owner' }, now: new Date().toISOString(),
     people: часть.people, resources: часть.resources, orders: часть.orders, ops: ops,
-    pending: pending, decided: Прил_решённые_(12), tasks: задачи,
+    pending: pending, decided: Прил_решённые_(фактСтроки, 12), tasks: задачи,
     settings: Прил_настройкиВсе_(),
   };
 }
 
-function Прил_решённые_(сколько) {
-  var sh = sheet_(SH.FACT, COL_FACT);
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var от = Math.max(2, last - 199);
-  var rows = sh.getRange(от, 1, last - от + 1, COL_FACT.length).getValues();
+/* Станки и участки рабочего. null — владелец (видит всё); пустой список —
+   рабочий без закреплённых станков (тоже видит всё, как в плане). */
+function Прил_мойУчасток_(me, часть) {
+  if (me.role !== 'worker') return null;
+  var w = часть.people.filter(function (x) { return x.name === me.name; })[0];
+  return w ? w.res : [];
+}
+
+function Прил_решённые_(rows, сколько) {
   var out = [];
   for (var i = rows.length - 1; i >= 0 && out.length < сколько; i--) {
     var r = rows[i];
     if (!s_(r[Ф.РЕШЕНИЕ])) continue;
-    var f = { start: s_(r[Ф.НАЧАЛО]), finish: s_(r[Ф.КОНЕЦ]), progress: r[Ф.ПРОЦ] === '' ? null : n_(r[Ф.ПРОЦ], 0),
+    var f = { start: s_(r[Ф.НАЧАЛО]), finish: s_(r[Ф.КОНЕЦ]), progress: r[Ф.ПРОЦ] === '' || r[Ф.ПРОЦ] == null ? null : n_(r[Ф.ПРОЦ], 0),
       scrap: s_(r[Ф.БРАК]), note: s_(r[Ф.ЗАМЕТКА]), moveTo: s_(r[Ф.ПЕРЕНОС]) };
-    out.push({ id: 'f' + (от + i), kind: Прил_видОтметки_(f), who: s_(r[Ф.КТО]), at: Прил_iso_(r[Ф.ВРЕМЯ]),
+    out.push({ id: 'f' + (i + 2), kind: Прил_видОтметки_(f), who: s_(r[Ф.КТО]), at: Прил_iso_(r[Ф.ВРЕМЯ]),
       opCode: s_(r[Ф.ОП]), text: Прил_текстОтметки_(f),
       result: s_(r[Ф.РЕШЕНИЕ]) === РЕШЕНО_ДА ? 'принято' : 'не принято', decidedAt: Прил_iso_(r[Ф.ПРИМЕНЕНО]) });
   }
@@ -476,6 +642,16 @@ function Прил_отменить_(row) {
 /* ------------------------------------------------------------- отметки смены */
 function Прил_отметка_(me, op, что, текст) {
   if (!op) throw Прил_ошибка_('Не сказано, по какой операции');
+  /* Рабочий отмечает только своё. Экран и так показывает ему только его
+     станки, но запрос можно собрать руками — проверяем и здесь. */
+  if (me.role === 'worker') {
+    var часть = Прил_планЧасть_();
+    var о = часть.ops.filter(function (x) { return x.code === op; })[0];
+    if (!о) throw Прил_ошибка_('Операции ' + op + ' нет в плане на эти дни — обновите экран');
+    var мои = Прил_мойУчасток_(me, часть);
+    if (мои.length && мои.indexOf(о.machine) < 0 && мои.indexOf(о.worker) < 0)
+      throw Прил_ошибка_('Операция ' + op + ' не на вашем участке');
+  }
   var кто = me.name;
   var сейчас = isoDT_(new Date());
   var f;
@@ -508,6 +684,21 @@ function Прил_деньСрока_(v) {
   if (isNaN(d)) return d_(t) || '';
   return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
+/* Время срока. Лист «Задачи» хранит только день (так его понимает
+   планировщик), а приложение ставит срок «до 15:00». Час храним рядом, в
+   «Поручениях»; пусто — значит конец дня. */
+function Прил_времяСрока_(v) {
+  var t = s_(v);
+  if (!t || /^\d{4}-\d{2}-\d{2}$/.test(t)) return '';
+  var d = new Date(t);
+  return isNaN(d) ? '' : Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm');
+}
+function Прил_поручДоп_() {
+  /* «Срок время» добавлен в схему позже — дописать столбец в старый лист. */
+  if (__прил && __прил.шапкаПор) return;
+  ensureHeader_(ПРИЛ.ПОРУЧ, COL_ППОР);
+  if (__прил) __прил.шапкаПор = true;
+}
 
 function Прил_задача_(me, t) {
   var текст = s_(t.text);
@@ -526,16 +717,17 @@ function Прил_задача_(me, t) {
     list.push(задача);
     записатьЗадачи_(list);
     sheet_(ПРИЛ.ПОРУЧ, COL_ППОР);
+    Прил_поручДоп_();
     appendRow_(ПРИЛ.ПОРУЧ, COL_ППОР, { 'Номер задачи': задача.n, 'Кому': кому, 'Заказ': s_(t.order),
-      'Отправлено': кому ? Прил_сейчас_() : '', 'Доставлено': '', 'Прочитано': '', 'Взял': '' });
+      'Отправлено': кому ? Прил_сейчас_() : '', 'Доставлено': '', 'Прочитано': '', 'Взял': '',
+      'Срок время': Прил_времяСрока_(t.due) });
   } finally { lock.releaseLock(); }
   if (кому) {
-    var n = Прил_пуш_(кому, { title: 'Поручение от мастера', body: текст + (задача.due ? ' · срок ' + задача.due.split('-').reverse().slice(0, 2).join('.') : ''),
-      url: '#/task/' + задача.n, tag: 'task-' + задача.n, kind: 'task' }, 'workerNew');
-    if (n) Прил_поручениеОтметить_(задача.n, 'Доставлено');
-    try { сказатьРабочему_(кому, 'Поручение от мастера (№' + задача.n + '): ' + текст); } catch (e) {}
+    Прил_пуш_(кому, { title: 'Поручение от мастера', body: текст + (задача.due ? ' · срок ' + задача.due.split('-').reverse().slice(0, 2).join('.') : ''),
+      url: '#/task/' + задача.n, tag: 'task-' + задача.n, kind: 'task', n: задача.n }, 'workerNew');
+    Прил_вОчередьДело_({ k: 'раб', кому: кому, text: 'Поручение от мастера (№' + задача.n + '): ' + текст });
   } else {
-    try { сказатьПроЗадачу_(задача, 'Новая задача'); } catch (e) {}
+    Прил_вОчередьДело_({ k: 'задача', t: задача, шапка: 'Новая задача' });
   }
   return задача.n;
 }
@@ -543,17 +735,19 @@ function Прил_задача_(me, t) {
 function Прил_поручениеОтметить_(n, поле, кому, заказ) {
   var sh = sheet_(ПРИЛ.ПОРУЧ, COL_ППОР);
   var last = sh.getLastRow();
-  var rows = last > 1 ? sh.getRange(2, 1, last - 1, COL_ППОР.length).getValues() : [];
+  var rows = last > 1 ? sh.getRange(2, 1, last - 1, 7).getValues() : [];
   var col = COL_ППОР.indexOf(поле) + 1;
   for (var i = 0; i < rows.length; i++) {
     if (n_(rows[i][0], 0) === n) {
-      if (поле === 'Кому') { sh.getRange(i + 2, 2, 1, 6).setValues([[кому, заказ !== undefined ? заказ : rows[i][2], Прил_сейчас_(), '', '', '']]); return; }
+      if (поле === 'Кому') { sh.getRange(i + 2, 2, 1, 6).setValues([[кому, заказ !== undefined ? заказ : rows[i][2], кому ? Прил_сейчас_() : '', '', '', '']]); return; }
+      if (поле === 'Срок время') { Прил_поручДоп_(); sh.getRange(i + 2, col).setValue(заказ || ''); return; }
       if (!s_(rows[i][col - 1])) sh.getRange(i + 2, col).setValue(Прил_сейчас_());
       return;
     }
   }
   if (поле === 'Кому') appendRow_(ПРИЛ.ПОРУЧ, COL_ППОР, { 'Номер задачи': n, 'Кому': кому, 'Заказ': заказ || '',
     'Отправлено': кому ? Прил_сейчас_() : '', 'Доставлено': '', 'Прочитано': '', 'Взял': '' });
+  if (поле === 'Срок время' && заказ) { Прил_поручДоп_(); appendRow_(ПРИЛ.ПОРУЧ, COL_ППОР, { 'Номер задачи': n, 'Срок время': заказ }); }
 }
 
 function Прил_задачаПравка_(me, p) {
@@ -586,16 +780,16 @@ function Прил_задачаПравка_(me, p) {
       if (p.text !== undefined && s_(p.text)) t.text = s_(p.text);
       записатьЗадачи_(list);
     } finally { lock.releaseLock(); }
-    if (пор.to && p.due !== undefined) Прил_пуш_(пор.to, { title: 'Поручение перенесено', body: 'Новый срок: ' + Прил_деньСрока_(p.due).split('-').reverse().slice(0, 2).join('.'), url: '#/task/' + n, tag: 'task-' + n }, 'workerNew');
+    if (p.due !== undefined) Прил_поручениеОтметить_(n, 'Срок время', '', Прил_времяСрока_(p.due));
+    if (пор.to && p.due !== undefined) Прил_пуш_(пор.to, { title: 'Поручение перенесено', body: 'Новый срок: ' + Прил_деньСрока_(p.due).split('-').reverse().slice(0, 2).join('.') + (Прил_времяСрока_(p.due) ? ' ' + Прил_времяСрока_(p.due) : ''), url: '#/task/' + n, tag: 'task-' + n }, 'workerNew');
   }
   if (p.to !== undefined) {
     var кому = s_(p.to);
     Прил_поручениеОтметить_(n, 'Кому', кому);
     if (кому) {
       var t1 = задачи_(true, true).filter(function (x) { return x.n === n; })[0] || {};
-      if (Прил_пуш_(кому, { title: 'Поручение от мастера', body: t1.text || '', url: '#/task/' + n, tag: 'task-' + n, kind: 'task' }, 'workerNew'))
-        Прил_поручениеОтметить_(n, 'Доставлено');
-      try { сказатьРабочему_(кому, 'Поручение от мастера (№' + n + '): ' + (t1.text || '')); } catch (e) {}
+      Прил_пуш_(кому, { title: 'Поручение от мастера', body: t1.text || '', url: '#/task/' + n, tag: 'task-' + n, kind: 'task', n: n }, 'workerNew');
+      Прил_вОчередьДело_({ k: 'раб', кому: кому, text: 'Поручение от мастера (№' + n + '): ' + (t1.text || '') });
     }
   }
 }
@@ -627,7 +821,7 @@ function Прил_задачаСлово_(me, n, текст) {
     Прил_телеграм_(me.name + ' по задаче №' + n + ' (' + t.text + '):\n' + текст, 'ask');
   } else if (пор.to) {
     Прил_пуш_(пор.to, { title: 'Мастер пишет', body: текст, url: '#/task/' + n, tag: 'task-' + n }, 'workerNew');
-    try { сказатьРабочему_(пор.to, 'Мастер по задаче №' + n + ': ' + текст); } catch (e) {}
+    Прил_вОчередьДело_({ k: 'раб', кому: пор.to, text: 'Мастер по задаче №' + n + ': ' + текст });
   }
 }
 
@@ -639,8 +833,83 @@ function Прил_прочитал_(me, n) {
   }
 }
 
-/* ----------------------------------------------------------- уведомления */
+/* ============================================================ уведомления
+   Путь уведомления:
+     1. действие в запросе кладёт его в __прил.очередь (Прил_пуш_,
+        Прил_телеграм_, Прил_вОчередьДело_) — ответ телефону не ждёт
+        Apple, Google и Телеграм;
+     2. в конце запроса очередь пишется в свойства (APP_Q:…), в ответе
+        flush: true;
+     3. телефон тут же присылает a: 'flush' — рассылка идёт отдельным
+        запросом, пока человек уже видит результат своего нажатия;
+     4. не прислал (закрыл приложение, пропала сеть) — разошлёт триггер
+        Триггер_приложение в течение пяти минут.
+   Вне запроса приложения (триггеры планировщика, меню) — сразу. */
 function Прил_кому_(me) { return me.role === 'owner' ? ПРИЛ_ВЛАДЕЛЕЦ : me.name; }
+
+function Прил_пуш_(кому, p, настройка, всегда) {
+  if (__прил && __прил.отложить) {
+    __прил.очередь.push({ k: 'push', кому: кому, p: p, н: настройка || '', в: !!всегда });
+    return -1;
+  }
+  return Прил_пушСейчас_(кому, p, настройка, всегда);
+}
+function Прил_вОчередьДело_(x) {
+  if (__прил && __прил.отложить) { __прил.очередь.push(x); return; }
+  Прил_выполнить_(x);
+}
+
+/* Каждое дело — своё свойство: предел свойства 9 КБ, а очередь из многих
+   дел в одном свойстве его бы переросла. */
+function Прил_вОчередь_(дела) {
+  var m = {}, t = Date.now();
+  дела.forEach(function (x, i) {
+    x.at = t;
+    m['APP_Q:' + t + ':' + i + ':' + Math.floor(Math.random() * 1e6)] = JSON.stringify(x);
+  });
+  props_().setProperties(m);
+}
+
+function Прил_разослать_() {
+  var pr = props_();
+  var взял = [];
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return 0;
+  try {
+    var св = pr.getProperties();
+    Object.keys(св).sort().forEach(function (k) {
+      if (k.indexOf('APP_Q:') !== 0) return;
+      pr.deleteProperty(k);                    // забрали — второй рассыльщик его не увидит
+      try { взял.push(JSON.parse(св[k])); } catch (e) {}
+    });
+  } finally { lock.releaseLock(); }
+  var назад = [], послано = 0;
+  взял.forEach(function (x) {
+    try { var r = Прил_выполнить_(x); if (r > 0 || r === true) послано++; }
+    catch (e) {
+      Logger.log('уведомление не ушло: %s', e);
+      x.попыток = (x.попыток || 0) + 1;
+      if (x.попыток < 3) назад.push(x);
+    }
+  });
+  if (назад.length) Прил_вОчередь_(назад);
+  return послано;
+}
+
+function Прил_выполнить_(x) {
+  if (x.k === 'push') return Прил_пушСейчас_(x.кому, x.p, x.н, x.в);
+  if (x.k === 'tg') return Прил_телеграмСейчас_(x.text, x.kind);
+  if (x.k === 'раб') { сказатьРабочему_(x.кому, x.text); return true; }
+  if (x.k === 'задача') {
+    /* Своя задача владельца: в Телеграм — как у планировщика, но без push
+       самому себе о том, что он только что завёл. */
+    if (Прил_настройкиВсе_().telegram === false) return false;
+    __прилБезПуша = true;
+    try { сказатьПроЗадачу_(x.t, x.шапка); } finally { __прилБезПуша = false; }
+    return true;
+  }
+  return false;
+}
 
 function Прил_подписка_(me, sub, ua) {
   if (!sub || !/^https:\/\//.test(s_(sub.endpoint)) || !sub.keys || !sub.keys.p256dh || !sub.keys.auth)
@@ -653,19 +922,28 @@ function Прил_подписка_(me, sub, ua) {
   writeTable_(ПРИЛ.ПУШ, COL_ППУШ, rows, 'подписки');
 }
 
+function Прил_тихо_(s, d) {
+  var h = Number(Utilities.formatDate(d || new Date(), Session.getScriptTimeZone(), 'H'));
+  return s.quiet === true && (h >= 22 || h < 7);
+}
+
 /* Отправить push всем телефонам человека. настройка — ключ из «Уведомления»
    в приложении (выключено — не шлём). Тихие часы глушат всё, кроме проблем.
-   Возвращает число телефонов, до которых дошло. */
-function Прил_пуш_(кому, p, настройка, всегда) {
+   Возвращает число телефонов, до которых дошло.
+
+   У каждого уведомления свой номер (p.id). Телефон, получив его, отвечает
+   a: 'ack' — и это настоящая «доставка», а не «Apple принял». Пока ответа
+   нет, номер лежит в свойствах APP_ACK:…; контроль доставки смотрит туда. */
+function Прил_пушСейчас_(кому, p, настройка, всегда) {
   var s = Прил_настройкиВсе_();
   if (!всегда) {
     if (настройка && s[настройка] === false) return 0;
-    var h = Number(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'H'));
-    if (s.quiet === true && (h >= 22 || h < 7) && p.kind !== 'problem') return 0;   // тихие часы — только если включены
+    if (Прил_тихо_(s) && p.kind !== 'problem') return 0;
   }
   var rows = readTable_(ПРИЛ.ПУШ, COL_ППУШ);
   var мои = rows.filter(function (r) { return s_(r['Кто']) === кому; });
   if (!мои.length) return 0;
+  p.id = p.id || (Прил_код_() + Прил_код_());
   var ok = 0, убрать = {}, ошибки = {};
   мои.forEach(function (r) {
     var res;
@@ -675,13 +953,77 @@ function Прил_пуш_(кому, p, настройка, всегда) {
     else if (res === 'gone') убрать[s_(r['Адрес'])] = 1;
     else ошибки[s_(r['Адрес'])] = res;
   });
+  if (ok && p.tag !== 'test') {
+    try {
+      props_().setProperty('APP_ACK:' + p.id, JSON.stringify({ к: кому, t: s_(p.title).slice(0, 80), at: Date.now(), n: p.n || 0 }));
+    } catch (e) {}
+  }
   if (Object.keys(убрать).length || Object.keys(ошибки).length) {
     try {
       writeTable_(ПРИЛ.ПУШ, COL_ППУШ, rows.filter(function (r) { return !убрать[s_(r['Адрес'])]; })
         .map(function (r) { if (ошибки[s_(r['Адрес'])]) r['Ошибка'] = Прил_сейчас_() + ' ' + ошибки[s_(r['Адрес'])]; return r; }), 'подписки');
     } catch (e) {}
+    /* Все телефоны человека отказались от подписки (приложение удалено или
+       уведомления выключены в настройках) — сказать владельцу, иначе он
+       будет думать, что поручения доходят. */
+    if (!ok && Object.keys(убрать).length === мои.length) {
+      Прил_тревога_(кому, (кому === ПРИЛ_ВЛАДЕЛЕЦ ? 'На вашем телефоне' : 'У ' + кому) +
+        ' отключились уведомления приложения РЗДС. Откройте приложение → колокольчик → «Включить уведомления».');
+    }
   }
   return ok;
+}
+
+/* Подтверждение от телефона: уведомление дошло. */
+function Прил_получено_(id) {
+  id = s_(id).replace(/[^A-Z0-9]/g, '').slice(0, 24);
+  if (!id) return { ok: true };
+  var pr = props_(), k = 'APP_ACK:' + id, v = pr.getProperty(k);
+  if (!v) return { ok: true };
+  pr.deleteProperty(k);
+  var e = {};
+  try { e = JSON.parse(v); } catch (x) {}
+  if (e.к) pr.setProperty('APP_ACKSEEN:' + e.к, String(Date.now()));
+  if (e.n && e.к && e.к !== ПРИЛ_ВЛАДЕЛЕЦ) {
+    try { Прил_поручениеОтметить_(Number(e.n), 'Доставлено'); } catch (x) {}
+  }
+  return { ok: true };
+}
+
+/* Не подтвердил за 10 минут — владельцу в Телеграм. Молчим про телефоны,
+   которые не подтверждали ни разу (стоит старая версия приложения, она
+   подтверждать не умеет), и не чаще раза в три часа на человека. */
+function Прил_контрольДоставки_(сейчас) {
+  var t = (сейчас || new Date()).getTime();
+  var pr = props_(), св = pr.getProperties();
+  var по = {};
+  Object.keys(св).forEach(function (k) {
+    if (k.indexOf('APP_ACK:') !== 0) return;
+    var e;
+    try { e = JSON.parse(св[k]); } catch (x) { pr.deleteProperty(k); return; }
+    var возраст = t - Number(e.at || 0);
+    if (возраст < 10 * 60000) return;
+    pr.deleteProperty(k);
+    if (возраст > 6 * 3600000) return;
+    if (!св['APP_ACKSEEN:' + e.к]) return;
+    (по[e.к] = по[e.к] || []).push(e);
+  });
+  Object.keys(по).forEach(function (кто) {
+    var сп = по[кто], посл = сп[сп.length - 1];
+    Прил_тревога_(кто, (кто === ПРИЛ_ВЛАДЕЛЕЦ ? 'Уведомления приложения не доходят до вашего телефона' :
+      кто + ' не получил уведомление приложения') +
+      (сп.length > 1 ? ' (' + сп.length + ' шт.)' : '') + ': «' + посл.t + '», отправлено в ' + Прил_чч_(new Date(посл.at)) +
+      '. Телефон без интернета, выключен или приложение удалено.' +
+      (кто !== ПРИЛ_ВЛАДЕЛЕЦ && посл.n ? ' Поручение №' + посл.n + ' — лучше позвонить.' : ''));
+  });
+  return Object.keys(по).length;
+}
+function Прил_тревога_(кто, текст) {
+  var pr = props_(), k = 'APP_ACKREP:' + кто;
+  if (Number(pr.getProperty(k) || 0) > Date.now() - 3 * 3600000) return false;
+  pr.setProperty(k, String(Date.now()));
+  Прил_телеграмСейчас_(текст, 'warn', true);
+  return true;
 }
 
 /* Всё, что планировщик и так сообщает владельцу в Телеграм через Уведомить_,
@@ -691,18 +1033,167 @@ function Прил_пуш_(кому, p, настройка, всегда) {
    нужен: для этого флаг __прилБезПуша. */
 var __прилБезПуша = false;
 function Прил_телеграм_(text, kind) {
-  if (Прил_настройкиВсе_().telegram === false) return;
+  if (__прил && __прил.отложить) { __прил.очередь.push({ k: 'tg', text: text, kind: kind }); return; }
+  Прил_телеграмСейчас_(text, kind);
+}
+function Прил_телеграмСейчас_(text, kind, всегда) {
+  if (!всегда && Прил_настройкиВсе_().telegram === false) return false;
   __прилБезПуша = true;
   try { Уведомить_(text, kind); } catch (e) { Logger.log('приложение → Телеграм: %s', e); }
   finally { __прилБезПуша = false; }
+  return true;
 }
 function Прил_пушВладельцу_(text, kind) {
   if (__прилБезПуша) return;
   var t = s_(text);
   if (!t) return;
   var шапка = { ask: 'Вопрос', wait: 'Жду решения', done: 'Готово', warn: 'Внимание' }[s_(kind)] || 'План производства';
-  Прил_пуш_(ПРИЛ_ВЛАДЕЛЕЦ, { title: шапка, body: t.slice(0, 180), url: '#/today', tag: 'note-' + s_(kind),
-    kind: kind === 'warn' ? 'problem' : 'note' }, null);
+  var настройка = null, tag = 'note-' + s_(kind);
+  /* Недельный отчёт планировщик шлёт в понедельник утром через Уведомить_;
+     его можно выключить в приложении отдельно от остального. */
+  if (s_(kind) === 'done' && /^Неделя /.test(t)) { шапка = 'Недельный отчёт'; настройка = 'weekly'; tag = 'weekly'; }
+  Прил_пуш_(ПРИЛ_ВЛАДЕЛЕЦ, { title: шапка, body: t.slice(0, 180), url: '#/today', tag: tag,
+    kind: kind === 'warn' ? 'problem' : 'note' }, настройка);
+}
+
+/* ======================================================= часы приложения
+   Триггер раз в пять минут: разослать то, что телефон не попросил
+   разослать сам; проверить доставку; напомнить по срокам. Всё, что уже
+   сказано, помечается в свойствах APP_REM:… — второй раз не говорится. */
+function Триггер_приложение() {
+  __прил = { отложить: false, очередь: [], листы: {} };
+  var сейчас = new Date();
+  [Прил_разослать_, Прил_контрольДоставки_, Прил_напоминания_].forEach(function (f) {
+    try { f(сейчас); } catch (e) { Logger.log('часы приложения: %s', e && e.stack || e); }
+  });
+  __прил = null;
+}
+
+function Прил_часыЗавести_() {
+  var есть = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'Триггер_приложение'; });
+  if (!есть) ScriptApp.newTrigger('Триггер_приложение').timeBased().everyMinutes(5).create();
+  props_().setProperty('APP_CLOCK', '1');
+  return есть ? 'часы приложения уже идут' : 'часы приложения заведены';
+}
+
+function Прил_напоминания_(сейчас) {
+  сейчас = сейчас || new Date();
+  var t = сейчас.getTime(), tz = Session.getScriptTimeZone();
+  var s = Прил_настройкиВсе_();
+  var мин = Number(Utilities.formatDate(сейчас, tz, 'H')) * 60 + Number(Utilities.formatDate(сейчас, tz, 'mm'));
+  var сегодня = Utilities.formatDate(сейчас, tz, 'yyyy-MM-dd');
+  var pr = props_(), св = pr.getProperties();
+  var было = function (k) { return !!св['APP_REM:' + k]; };
+  var отметить = function (k) { св['APP_REM:' + k] = String(t); pr.setProperty('APP_REM:' + k, String(t)); };
+  Object.keys(св).forEach(function (k) {
+    if (k.indexOf('APP_REM:') === 0 && Number(св[k]) < t - 4 * 864e5) pr.deleteProperty(k);
+  });
+  var сказано = [];
+
+  /* 1. Утренняя сводка владельцу, 07:45. */
+  if (мин >= 7 * 60 + 45 && мин < 11 * 60 && !было('утро:' + сегодня)) {
+    отметить('утро:' + сегодня);
+    if (s.morning !== false) {
+      var текст = Прил_сводка_(сейчас);
+      if (текст) { Прил_пушСейчас_(ПРИЛ_ВЛАДЕЛЕЦ, { title: 'Доброе утро · что сегодня', body: текст, url: '#/today', tag: 'morning' }, 'morning'); сказано.push('утро'); }
+    }
+  }
+  if (Прил_тихо_(s, сейчас)) return сказано;
+
+  var задачи = Прил_задачиДляВида_();
+  задачи.forEach(function (x) {
+    if (x.state !== ЗАДАЧА_ОТКР) return;
+    /* 2. За час до срока — исполнителю (себе, если задача своя). Срок без
+       часа — это конец рабочего дня, 17:00. */
+    if (x.due) {
+      var срок = /T/.test(x.due) ? new Date(x.due) : Прил_дата_(x.due + 'T17:00');
+      var до = срок ? срок.getTime() - t : -1;
+      var k = 'срок:' + x.n + ':' + x.due;
+      if (до > 0 && до <= 60 * 60000 && !было(k)) {
+        отметить(k);
+        Прил_пушСейчас_(x.to || ПРИЛ_ВЛАДЕЛЕЦ, { title: '⏰ Через ' + Math.max(1, Math.round(до / 60000)) + ' мин срок', body: x.text,
+          url: '#/task/' + x.n, tag: 'task-' + x.n, kind: x.to ? 'task' : 'note' }, 'taskDue');
+        сказано.push('срок №' + x.n);
+      }
+    }
+    /* 3. Поручение не прочитано 30 минут — повторить исполнителю и сказать
+       владельцу. Один раз на каждое отправление. */
+    var d = x.delivery;
+    if (x.to && d && d.sent && !d.read) {
+      var прошло = t - new Date(d.sent).getTime();
+      var k2 = 'непрочитано:' + x.n + ':' + d.sent;
+      if (прошло >= 30 * 60000 && прошло < 24 * 3600000 && !было(k2)) {
+        отметить(k2);
+        if (s.taskUnread !== false) {
+          Прил_пушСейчас_(x.to, { title: 'Напоминание: поручение от мастера', body: x.text, url: '#/task/' + x.n,
+            tag: 'task-' + x.n, kind: 'task', n: x.n }, null);
+          Прил_пушСейчас_(ПРИЛ_ВЛАДЕЛЕЦ, { title: x.to + ' не прочитал поручение', body: '№' + x.n + ' · ' + x.text +
+            ' — отправлено в ' + Прил_чч_(new Date(d.sent)) + '. Напомнил ему ещё раз.', url: '#/task/' + x.n, tag: 'task-' + x.n }, 'taskUnread');
+          сказано.push('непрочитано №' + x.n);
+        }
+      }
+    }
+  });
+
+  /* 4. Конец смены — рабочим «отчитайтесь» за 5–15 минут до конца. */
+  var концы = Прил_концыСмен_(сегодня, мин);
+  Object.keys(концы).forEach(function (имя) {
+    var до = концы[имя] - t;
+    var k = 'смена:' + сегодня + ':' + имя;
+    if (до > 0 && до <= 15 * 60000 && !было(k)) {
+      отметить(k);
+      Прил_пушСейчас_(имя, { title: 'Смена кончается в ' + Прил_чч_(new Date(концы[имя])), body: 'Отметьте, что сделано: «Закончил» или «Проблема» по своим операциям.',
+        url: '#/shift', tag: 'report' }, 'workerReport');
+      сказано.push('смена ' + имя);
+    }
+  });
+  return сказано;
+}
+
+/* Концы смен считаются раз в день (движок плана дорогой) и лежат в
+   свойствах до завтра. */
+function Прил_концыСмен_(сегодня, мин) {
+  var pr = props_();
+  try {
+    var x = JSON.parse(pr.getProperty('APP_ENDS') || '{}');
+    if (x.д === сегодня) return x.e || {};
+  } catch (e) {}
+  if (мин < 5 * 60) return {};
+  var eng = engineNow_(), e = {};
+  readTable_(SH.WRK, COL_WRK).forEach(function (r) {
+    if (!bool_(r['Активен'])) return;
+    try {
+      var конец = конецСмены_(eng, parseList_(r['Ресурсы']), сегодня);
+      if (конец) e[s_(r['Имя'])] = конец.getTime();
+    } catch (err) {}
+  });
+  pr.setProperty('APP_ENDS', JSON.stringify({ д: сегодня, e: e }));
+  return e;
+}
+
+function Прил_сводка_(сейчас) {
+  var v = Прил_вид_({ role: 'owner', name: 'Павел' });
+  var с0 = new Date(сейчас); с0.setHours(0, 0, 0, 0);
+  var с1 = new Date(с0.getTime() + 864e5);
+  var опс = v.ops.filter(function (o) { return new Date(o.start) < с1 && new Date(o.end) >= с0 && o.status !== 'выполнено'; });
+  var пробл = v.ops.filter(function (o) { return o.status === 'проблема'; }).length;
+  var мои = v.tasks.filter(function (x) { return x.state === ЗАДАЧА_ОТКР && !x.to && x.due; });
+  var срокДня = function (x) { return /T/.test(x.due) ? new Date(x.due) : Прил_дата_(x.due + 'T17:00'); };
+  var наСегодня = мои.filter(function (x) { var d = срокДня(x); return d && d >= с0 && d < с1; }).length;
+  var проср = мои.filter(function (x) { var d = срокДня(x); return d && d < с0; }).length;
+  var части = [];
+  if (опс.length) части.push('в цеху ' + опс.length + ' ' + Прил_мн_(опс.length, 'операция', 'операции', 'операций'));
+  if (пробл) части.push('⚠️ проблем: ' + пробл);
+  if (v.pending.length) части.push('ждут решения: ' + v.pending.length);
+  if (наСегодня) части.push('ваших задач на сегодня: ' + наСегодня);
+  if (проср) части.push('просрочено: ' + проср);
+  if (!части.length) return '';
+  var т = части.join(' · ');
+  return т.charAt(0).toUpperCase() + т.slice(1) + '.';
+}
+function Прил_мн_(n, a, b, c) {
+  var x = Math.abs(n) % 100, y = x % 10;
+  return x > 10 && x < 20 ? c : y === 1 ? a : y >= 2 && y <= 4 ? b : c;
 }
 
 /* ----------------------------------------------- код владельцу с телефона */
@@ -746,3 +1237,29 @@ function Меню_вход_в_приложение() {
     ui.ButtonSet.OK);
 }
 function Пуск_A_вход_в_приложение() { своимиРуками_(); var r = Прил_выдатьКод_('Павел', 'owner'); Logger.log('Код: %s, адрес: %s', r.code, r.link); return r.code; }
+function Пуск_B_часы_приложения() { своимиРуками_(); var m = Прил_часыЗавести_(); Logger.log(m); return m; }
+
+/* Замер: сколько стоит каждый шаг ответа приложения. Запускать из
+   редактора; итог — в журнале выполнения. */
+function Пуск_C_замер_приложения() {
+  своимиРуками_();
+  var т = [], t0 = Date.now(), всего = Date.now();
+  var шаг = function (имя) { var t = Date.now(); т.push(имя + ': ' + (t - t0) + ' мс'); t0 = t; };
+  __прил = { отложить: true, очередь: [], листы: {} };
+  Прил_св_(); шаг('свойства скрипта');
+  ss_(); шаг('открыть таблицу');
+  var ф = Прил_лист_('факт'); шаг('лист «Факт», строк ' + ф.строки.length);
+  var з = Прил_лист_('задачи'); шаг('лист «Задачи», строк ' + з.строки.length);
+  var к = Прил_лист_('комм'); шаг('лист «Комментарии задач», строк ' + к.строки.length);
+  var п = Прил_лист_('пор'); шаг('лист «Поручения», строк ' + п.строки.length);
+  Прил_планЧасть_(); шаг('план (кэш или расчёт)');
+  var v = Прил_вид_({ role: 'owner', name: 'Павел' }); шаг('сборка ответа');
+  т.push('размер ответа: ' + Math.round(JSON.stringify(v).length / 1024) + ' КБ');
+  т.push('всего: ' + (Date.now() - всего) + ' мс');
+  __прил = { отложить: true, очередь: [], листы: {} };
+  t0 = Date.now();
+  Прил_вид_({ role: 'owner', name: 'Павел' }); шаг('повтор (таблица уже открыта, план в кэше)');
+  __прил = null;
+  Logger.log(т.join('\n'));
+  return т.join('\n');
+}

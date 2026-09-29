@@ -47,7 +47,7 @@ const M = JSON.parse(run("JSON.stringify(readTable_(SH.OPS, COL_OPS).filter(func
 run(`appendRow_(SH.WRK, COL_WRK, {'Имя':'Слесарь','Ресурсы':${JSON.stringify(M)},'Токен':'tok1','Активен':'да'})`);
 const ownerCode = JSON.parse(run("JSON.stringify(Прил_выдатьКод_('Павел','owner'))")).code;
 
-let calls = 0;
+let calls = 0; const acts = {};
 const srv = http.createServer((req, res) => {
   const u = new URL(req.url, "http://x");
   if (u.pathname === "/exec" && req.method === "POST") {
@@ -55,6 +55,7 @@ const srv = http.createServer((req, res) => {
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       calls++;
+      try { const a = JSON.parse(body).a; acts[a] = (acts[a] || 0) + 1; } catch (e) {}
       ctx.__body = body;
       const out = run(`doPost({ parameter: { app: ${JSON.stringify(u.searchParams.get("app") || "")} }, postData: { contents: __body } })`);
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -145,7 +146,31 @@ await sleep(2000);
 await expect(!(await txt()).includes("Не удалось") && (await page.$$('[data-act="decide"]')).length >= 1, "решение принято сервером");
 await shot("e7-after-decide");
 
-console.log(`\nзапросов к серверу: ${calls}`);
+/* «Исходящие»: без сети задача не пропадает и уходит сама */
+await go("#/new");
+await page.type('[data-bind="text"]', "Задача без связи");
+await page.setOfflineMode(true);
+await page.click('[data-act="save"]');
+await sleep(1200);
+await expect((await txt()).includes("Ждёт отправки: 1") && (await txt()).includes("ждёт отправки"), "без связи: задача на экране, «Ждёт отправки: 1»");
+await shot("e8-outbox");
+await page.click('[data-act="ob-open"]');
+await sleep(400);
+await expect((await txt()).includes("Задача: Задача без связи"), "в «Исходящих» видно, что ждёт");
+await shot("e9-outbox-sheet");
+await page.setOfflineMode(false);
+await sleep(2500);
+const tasksNow = JSON.parse(run("JSON.stringify(задачи_(false).filter(function(t){return t.text==='Задача без связи'}).length)"));
+await expect(tasksNow === 1 && !(await txt()).includes("Ждёт отправки"), "сеть вернулась — ушла сама, ровно одна задача на сервере (" + tasksNow + ")");
+await expect((acts.flush || 0) > 0, "телефон просит разослать уведомления отдельным запросом (flush: " + (acts.flush || 0) + ")");
+
+/* «Мои входы» */
+await go("#/sessions");
+await sleep(1200);
+await expect((await txt()).toLowerCase().includes("этот телефон") && (await txt()).toLowerCase().includes("слесарь"), "«Входы в приложение»: свой телефон и рабочий");
+await shot("e10-sessions");
+
+console.log(`\nзапросов к серверу: ${calls} — ${JSON.stringify(acts)}`);
 console.log(errs.length ? "ошибки на странице:\n" + errs.join("\n") : "ошибок на странице нет");
 console.log(`Итого: ${ok} прошло, ${bad} упало`);
 await browser.close(); await browser2.close(); srv.close();

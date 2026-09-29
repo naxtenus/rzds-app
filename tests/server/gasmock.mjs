@@ -85,6 +85,7 @@ class FakeSheet {
   }
   getMaxColumns() { return Math.max(this.maxCols, this.getLastColumn()); }
   getRange(r, c, nr = 1, nc = 1) { return new FakeRange(this, r, c, nr, nc); }
+  getDataRange() { return new FakeRange(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   appendRow(vals) {
     const r = this.getLastRow() + 1;
     vals.forEach((v, j) => this._set(r, j + 1, v));
@@ -166,6 +167,8 @@ export function makeEnv(opts = {}) {
         getProperty: k => (state.props.has(k) ? state.props.get(k) : null),
         setProperty: (k, v) => { state.props.set(k, String(v)); },
         deleteProperty: k => { state.props.delete(k); },
+        getProperties: () => Object.fromEntries(state.props),
+        setProperties: m => { Object.keys(m).forEach(k => state.props.set(k, String(m[k]))); },
       }),
     },
     SpreadsheetApp: {
@@ -247,6 +250,8 @@ export function makeEnv(opts = {}) {
         get: k => (state.cache.has(k) ? state.cache.get(k) : null),
         put: (k, v) => { state.cache.set(k, String(v)); },
         remove: k => { state.cache.delete(k); },
+        getAll: ks => Object.fromEntries(ks.filter(k => state.cache.has(k)).map(k => [k, state.cache.get(k)])),
+        putAll: m => { Object.keys(m).forEach(k => state.cache.set(k, String(m[k]))); },
       }),
     },
     ScriptApp: {

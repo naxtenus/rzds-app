@@ -5,6 +5,7 @@ import { store } from './store.js';
 import { session } from './api.js';
 import { setBadge } from './push.js';
 import { esc } from './util.js';
+import * as ob from './outbox.js';
 import * as today from './views/today.js';
 import * as plan from './views/plan.js';
 import * as tasks from './views/tasks.js';
@@ -14,11 +15,12 @@ import * as replies from './views/replies.js';
 import * as notify from './views/notify.js';
 import * as shift from './views/shift.js';
 import * as login from './views/login.js';
+import * as sessions from './views/sessions.js';
 
 const root = document.getElementById('app');
 
-const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, install: { render: login.renderInstall, on: login.on } };
-const WORKER = { shift, task, notify, install: { render: login.renderInstall, on: login.on } };
+const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, install: { render: login.renderInstall, on: login.on } };
+const WORKER = { shift, task, notify, sessions, install: { render: login.renderInstall, on: login.on } };
 
 function route() {
   const h = (location.hash || '#/').slice(2).split('?')[0];
@@ -49,7 +51,10 @@ function render() {
   root.classList.toggle('still', key === lastRoute);
   const toast = store.toast ? `<div class="toast ${store.toast.kind}" role="status">${store.toast.kind === 'wait' ? '<i class="spinner" aria-hidden="true"></i>' : ''}${esc(store.toast.text)}</div>` : '';
   const demo = store.isDemo && session.get() ? '<div class="demo-flag">ДЕМО</div>' : '';
-  root.innerHTML = r.view.render(r.params) + toast + demo;
+  const waiting = session.get() ? store.outboxSize : 0;
+  const outbox = waiting ? ob.chip(waiting, store.sending) + (store.ui.outboxOpen ? ob.sheet(ob.outbox.list(), store.sending, (ob.outbox.list()[0] || {}).err) : '') : '';
+  root.classList.toggle('has-ob', !!waiting);
+  root.innerHTML = r.view.render(r.params) + outbox + toast + demo;
   if (key !== lastRoute) window.scrollTo(0, 0);
   lastRoute = key;
 
@@ -74,6 +79,18 @@ function render() {
    видно, и хочется нажать ещё раз (а второе нажатие — это вторая задача).
    Экран за это время может перерисоваться, поэтому помним не саму кнопку,
    а её «адрес»: действие + данные, и после каждой отрисовки отмечаем заново. */
+/* Нажатия, общие для всех экранов: «Исходящие». */
+const GLOBAL = {
+  'ob-open': () => { store.ui.outboxOpen = true; store.emit(); },
+  'ob-close': () => { store.ui.outboxOpen = false; store.emit(); },
+  'ob-send': () => store.sendOutbox(),
+  'ob-drop': (el) => {
+    ob.outbox.remove(el.dataset.cid);
+    if (!ob.outbox.size) { store.ui.outboxOpen = false; store.refresh(true); }
+    store.say('Убрал из «Исходящих»');
+  },
+};
+
 const busy = new Set();
 const keyOf = (el) => el.dataset.act + '|' + Object.keys(el.dataset).filter((k) => k !== 'act').sort()
   .map((k) => k + '=' + el.dataset[k]).join('&');
@@ -87,7 +104,7 @@ root.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el || !root.contains(el)) return;
   const r = route();
-  const fn = (r.view.on || {})[el.dataset.act];
+  const fn = GLOBAL[el.dataset.act] || (r.view.on || {})[el.dataset.act];
   if (!fn) return;
   if (el.tagName !== 'A') e.preventDefault();
   if (el.classList.contains('busy')) return;
@@ -135,6 +152,8 @@ store.sub(render);
    пока экран на виду. */
 document.addEventListener('visibilitychange', () => { if (!document.hidden && session.get()) store.refresh(true); });
 setInterval(() => { if (!document.hidden && session.get()) store.refresh(true); }, 60000);
+/* Сеть вернулась — сразу отправить то, что ждёт. */
+window.addEventListener('online', () => { if (session.get()) store.refresh(true); });
 
 /* Нажатие на уведомление, когда приложение уже открыто. */
 if ('serviceWorker' in navigator) {

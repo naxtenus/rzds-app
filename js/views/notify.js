@@ -11,20 +11,20 @@ const ROWS = [
     ['problem', 'Проблема на станке', 'Сразу, со звуком, даже в тихие часы'],
     ['answers', 'Ответ со смены', 'Сразу — если нужно ваше решение'],
     ['morning', 'Утренняя сводка', 'Каждый день в 07:45'],
-    ['weekly', 'Недельный отчёт', 'Понедельник, 08:00'],
+    ['weekly', 'Недельный отчёт', 'Понедельник утром'],
   ]],
   ['Задачи', [
-    ['taskDue', 'Срок моей задачи', 'За 1 час до срока'],
+    ['taskDue', 'Срок задачи', 'За час до срока — исполнителю; без времени — в 16:00'],
     ['taskReply', 'Исполнитель ответил или выполнил', 'Сразу'],
-    ['taskUnread', 'Поручение не прочитано', 'Повторить исполнителю через 30 мин и сказать мне'],
+    ['taskUnread', 'Поручение не прочитано', 'Через 30 мин — повторить исполнителю и сказать мне'],
   ]],
   ['Рабочим', [
     ['workerNew', 'Новое задание или поручение', 'Сразу, со звуком'],
-    ['workerReport', 'Отчитаться по смене', 'За 5 минут до конца смены'],
+    ['workerReport', 'Отчитаться по смене', 'За 5–15 минут до конца смены'],
   ]],
   ['Общее', [
     ['quiet', 'Тихие часы 22:00–07:00', 'Кроме проблем на станке'],
-    ['telegram', 'Дублировать в Телеграм', 'Запасной канал через @rzds_prod_bot'],
+    ['telegram', 'Дублировать в Телеграм', 'Запасной канал через @rzds_prod_bot. Если уведомление не дошло до телефона — скажу там всегда'],
   ]],
 ];
 
@@ -71,6 +71,7 @@ export function render() {
         <div class="kv"><span class="k">Вход</span><span class="v">${esc((store.me && store.me.name) || '')}${store.isDemo ? ' · демо' : ''}</span></div>
         <div class="kv"><span class="k">Версия</span><span class="v">${CONFIG.version}${isIOS() ? (isStandalone() ? ' · с экрана «Домой»' : ' · в Safari') : ''}</span></div>
         ${store.isDemo ? `<button class="kv" data-act="demo-reset" style="width:100%;border:none;background:none;text-align:left">${icon.refresh(20)}<span class="v">Сбросить демо-данные</span></button>` : ''}
+        ${worker ? `<a class="kv" href="#/sessions" style="text-decoration:none;color:inherit">${icon.phone(20)}<span class="v">Мои входы</span>${icon.next(18)}</a>` : ''}
         <button class="kv" data-act="logout" style="width:100%;border:none;background:none;text-align:left;color:#B3261E">${icon.logout(20)}<span class="v">Выйти на этом телефоне</span></button>
       </div>
     </section>
@@ -86,7 +87,7 @@ function accessBlock(d) {
     ${iss ? `<div class="card" style="display:flex;flex-direction:column;gap:10px;border-color:var(--green)">
       <div class="small muted strong">Код для: ${esc(iss.name)}</div>
       <div style="font-family:Unbounded,Onest,sans-serif;font-size:34px;font-weight:700;letter-spacing:.18em;text-align:center">${esc(iss.code)}</div>
-      <div class="small">Действует сутки, вводится один раз. На телефоне: открыть <b>${esc(location.origin + location.pathname)}</b> в Safari → «Поделиться» → «На экран „Домой“» → открыть РЗДС с иконки → ввести код.</div>
+      <div class="small">Действует сутки, годится на три входа. На телефоне: открыть <b>${esc(location.origin + location.pathname)}</b> в Safari → «Поделиться» → «На экран „Домой“» → открыть РЗДС с иконки → ввести код.</div>
       <div class="btns"><button class="btn primary" data-act="share-code">Отправить</button><button class="btn" data-act="hide-code">Готово</button></div>
     </div>` : ''}
     <div class="list">${people.map((p) => `<div class="kv">
@@ -94,7 +95,7 @@ function accessBlock(d) {
       <span class="v">${esc(p.label)}</span>
       <button class="btn ghost" data-act="issue" data-name="${esc(p.name)}" data-role="${p.role}" style="height:40px;padding:0 6px">Выдать вход</button>
     </div>`).join('')}</div>
-    <div class="small muted" style="padding:0 4px">Отключить чей-то вход: лист «Входы приложения», «Активен» = нет.</div>
+    <a class="kv" href="#/sessions" style="text-decoration:none;color:inherit;border:1px solid var(--line);border-radius:16px;background:var(--card)">${icon.phone(20)}<span class="v">Все входы — посмотреть и отключить</span>${icon.next(18)}</a>
   </section>`;
 }
 

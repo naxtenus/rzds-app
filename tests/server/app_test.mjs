@@ -234,15 +234,20 @@ check("пробное уведомление уходит с подписью VA
   eq(h["Content-Encoding"], "aes128gcm", "шифрование");
   return `тело ${pushes[0].len} байт`;
 });
-check("отметка рабочего будит владельца push-уведомлением", () => {
+check("отметка рабочего будит владельца push — отдельным запросом flush, ответ его не ждёт", () => {
+  post({ a: "flush", s: WRK });            // очередь от отметок раздела 3
   pushes.length = 0;
-  post({ a: "mark", s: WRK, op: WOP, what: "comment", text: "деталь на контроле" });
+  const v = post({ a: "mark", s: WRK, op: WOP, what: "comment", text: "деталь на контроле" });
+  eq(pushes.length, 0, "push ушёл прямо в ответе на нажатие");
+  truthy(v.flush, "в ответе нет просьбы разослать");
+  truthy(post({ a: "flush", s: WRK }).sent >= 1, "не разослано");
   truthy(pushes.some((p) => p.url.endsWith("/own")), "владельцу не ушло");
   eq(pushes[0].headers.Urgency, "normal", "срочность");
 });
 check("проблема — со срочностью high", () => {
   pushes.length = 0;
   post({ a: "mark", s: WRK, op: WOP, what: "problem", text: "нет заготовки" });
+  post({ a: "flush", s: WRK });
   eq(pushes[0].headers.Urgency, "high", "срочность");
 });
 check("Уведомить_ (всё, что планировщик пишет владельцу) дублируется push", () => {
@@ -254,6 +259,7 @@ check("выключенная настройка глушит push", () => {
   post({ a: "settingsSave", s: OWN, settings: { answers: false } });
   pushes.length = 0;
   post({ a: "mark", s: WRK, op: WOP, what: "comment", text: "ещё слово" });
+  post({ a: "flush", s: WRK });
   eq(pushes.length, 0, "ушло, хотя выключено");
   post({ a: "settingsSave", s: OWN, settings: { answers: true } });
 });
@@ -272,16 +278,29 @@ check("задача себе", () => {
   truthy(!v.error, v.error);
   const t = v.tasks.find((x) => x.n === v.created);
   eq(t.to, "", "кому"); eq(t.weight, "важно", "важность");
-  truthy(/^\d{4}-\d{2}-\d{2}$/.test(t.due), "срок " + t.due);
+  truthy(/T/.test(t.due) && Math.abs(new Date(t.due) - Date.now() - 864e5) < 61000, "срок со временем " + t.due);
+  const v2 = post({ a: "taskSave", s: OWN, task: { text: "Без часа", due: "2026-12-01" } });
+  eq(v2.tasks.find((x) => x.n === v2.created).due, "2026-12-01", "срок днём");
+  post({ a: "taskUpdate", s: OWN, n: v2.created, state: "убрана" });
 });
 check("поручение рабочему: push ушёл, «Доставлено» отмечено", () => {
   pushes.length = 0;
+  post({ a: "flush", s: OWN });
+  run("Object.keys(props_().getProperties()).forEach(function(k){ if (k.indexOf('APP_ACK:')===0) props_().deleteProperty(k); })");
+  pushes.length = 0;
   const v = post({ a: "taskSave", s: OWN, task: { text: "Подготовить заготовки", to: "Слесарь", order: "", weight: "срочно" } });
   N = v.created;
-  const t = v.tasks.find((x) => x.n === N);
+  let t = v.tasks.find((x) => x.n === N);
   eq(t.to, "Слесарь", "кому");
-  truthy(t.delivery.sent && t.delivery.delivered, "нет отметок доставки");
+  truthy(t.delivery.sent && !t.delivery.delivered, "«Доставлено» раньше, чем телефон подтвердил");
+  post({ a: "flush", s: OWN });
   truthy(pushes.some((p) => p.url.endsWith("/wrk2")), "рабочему не ушло");
+  const ack = Object.keys(j("props_().getProperties()")).filter((k) => k.startsWith("APP_ACK:"));
+  eq(ack.length, 1, "ждущих подтверждения");
+  eq(post({ a: "ack", id: ack[0].slice(8) }).ok, true, "подтверждение без сессии");
+  t = post({ a: "load", s: OWN }).tasks.find((x) => x.n === N);
+  truthy(t.delivery.delivered, "после подтверждения нет «Доставлено»");
+  return "«Доставлено» — по подтверждению телефона";
 });
 check("рабочий видит только свои поручения и читает", () => {
   let w = post({ a: "load", s: WRK });
@@ -313,7 +332,7 @@ check("перенос, важность, передача другому", () =>
   post({ a: "taskUpdate", s: OWN, n: N, weight: "потом", due: "2026-10-05T12:00:00.000Z" });
   post({ a: "taskUpdate", s: OWN, n: N, to: "Маляр" });
   const t = post({ a: "load", s: OWN }).tasks.find((x) => x.n === N);
-  eq(t.weight, "потом", "важность"); eq(t.due, "2026-10-05", "срок"); eq(t.to, "Маляр", "кому");
+  eq(t.weight, "потом", "важность"); truthy(String(t.due).startsWith("2026-10-05T"), "срок " + t.due); eq(t.to, "Маляр", "кому");
   eq(post({ a: "load", s: WRK }).tasks.length, 0, "у прежнего исполнителя осталось");
 });
 check("задачи видны и в планировщике (тот же лист «Задачи»)", () => {
@@ -353,11 +372,142 @@ check("выключенный вход перестаёт работать", () 
   state.cache.clear();
   eq(post({ a: "load", s: WRK }).code, "auth", "код");
 });
-check("перебор кодов упирается в предел", () => {
+check("перебор кодов упирается в предел — у каждого телефона свой", () => {
   state.cache.clear();
-  let r; for (let i = 0; i < 25; i++) r = post({ a: "login", code: "QQQQQQ" });
-  truthy(/Слишком много попыток/.test(r.error), r.error);
+  let r; for (let i = 0; i < 12; i++) r = post({ a: "login", code: "QQQQQQ", dev: "dev-A" });
+  truthy(/С этого телефона слишком много попыток/.test(r.error), r.error);
+  eq(post({ a: "login", code: "QQQQQQ", dev: "dev-B" }).error, "Код не подошёл", "другой телефон заперт чужими ошибками");
+  for (let i = 0; i < 100; i++) r = post({ a: "login", code: "QQQQQQ", dev: "d" + i });
+  truthy(/Слишком много попыток входа/.test(r.error), "общий предел: " + r.error);
+  state.cache.clear();
 });
+
+console.log("\n7. Волна 1: надёжность");
+const topics = () => pushes.map((p) => (p.url.split("/").pop()) + ":" + (p.headers.Topic || ""));
+WRK = post({ a: "login", code: post({ a: "issueCode", s: OWN, name: "Слесарь" }).code, dev: "wrk-new" }).token;   // прежний вход выключен в разделе 6
+const ackKeys = () => Object.keys(j("props_().getProperties()")).filter((k) => k.startsWith("APP_ACK:"));
+check("повтор того же нажатия (cid) не делает дело дважды", () => {
+  const n0 = post({ a: "load", s: OWN }).tasks.length;
+  const a = post({ a: "taskSave", s: OWN, cid: "abc-1", task: { text: "Один раз" } });
+  const b = post({ a: "taskSave", s: OWN, cid: "abc-1", task: { text: "Один раз" } });
+  eq(b.tasks.length, n0 + 1, "задач");
+  eq(b.created, a.created, "номер в повторе"); truthy(b.repeat, "повтор не узнан");
+  post({ a: "taskUpdate", s: OWN, n: a.created, state: "убрана" });
+});
+check("рабочий не отмечает чужую операцию", () => {
+  const all = post({ a: "load", s: OWN }).ops;
+  const чужая = all.find((o) => o.res !== M);
+  truthy(чужая, "нет чужой операции в демо-плане");
+  const r = post({ a: "mark", s: WRK, op: чужая.code, what: "start" });
+  truthy(/не на вашем участке/.test(r.error), "отметил чужую: " + чужая.code + " " + чужая.res + " / " + JSON.stringify(r.error || "без ошибки") + " / люди " + JSON.stringify(post({ a: "load", s: OWN }).people));
+  truthy(/нет в плане/.test(post({ a: "mark", s: WRK, op: "НЕТ-ТАКОЙ", what: "start" }).error), "отметил несуществующую");
+});
+let WRK2;
+check("«Мои входы»: владелец видит все, рабочий — свои, отключение работает сразу", () => {
+  WRK2 = post({ a: "login", code: post({ a: "issueCode", s: OWN, name: "Маляр" }).code, ua: "Mozilla (Linux; Android 14) Chrome" }).token;
+  const own = post({ a: "sessions", s: OWN }).sessions;
+  truthy(own.some((x) => x.me && x.role === "owner"), "владелец не видит свой телефон");
+  truthy(own.some((x) => x.name === "Маляр"), "владелец не видит рабочего");
+  const w = post({ a: "sessions", s: WRK2 }).sessions;
+  truthy(w.length && w.every((x) => x.name === "Маляр"), "рабочий видит чужие входы");
+  const mine = w.find((x) => x.me);
+  truthy(/не ваш вход/.test(post({ a: "revoke", s: WRK2, row: own.find((x) => x.me).row }).error), "рабочий отключил вход владельца");
+  post({ a: "revoke", s: OWN, row: mine.row });
+  eq(post({ a: "load", s: WRK2 }).code, "auth", "отключённый вход работает");
+});
+check("вход, которым не пользовались 90 дней, выключается сам", () => {
+  const code = post({ a: "issueCode", s: OWN, name: "Маляр" }).code;
+  const t = post({ a: "login", code }).token;
+  state.cache.clear();
+  run(`(function(){var sh=sheet_('Входы приложения',COL_ПВХ);var last=sh.getLastRow();sh.getRange(last,8).setValue('01.01.2026 10:00');})()`);
+  const r = post({ a: "load", s: t });
+  eq(r.code, "auth", "пустил"); truthy(/90 дней/.test(r.error), r.error);
+});
+check("часы приложения заводятся сами при входе владельца", () => {
+  run("props_().deleteProperty('APP_CLOCK')");
+  post({ a: "load", s: OWN });
+  truthy(state.triggers.some((t) => t.getHandlerFunction() === "Триггер_приложение" && t.minutes === 5), "триггера нет");
+  post({ a: "load", s: OWN });
+  eq(state.triggers.filter((t) => t.getHandlerFunction() === "Триггер_приложение").length, 1, "триггеров");
+});
+check("телефон не попросил разослать — разошлёт триггер", () => {
+  post({ a: "flush", s: OWN }); pushes.length = 0;
+  post({ a: "mark", s: WRK, op: WOP, what: "comment", text: "без flush" });
+  eq(pushes.length, 0, "ушло сразу");
+  run("Триггер_приложение()");
+  truthy(pushes.some((p) => p.url.endsWith("/own")), "триггер не разослал: " + state.logs.slice(-5).join(" | "));
+  eq(Object.keys(j("props_().getProperties()")).filter((k) => k.startsWith("APP_Q:")).length, 0, "очередь не пуста");
+});
+check("контроль доставки: телефон молчит 10 минут — владельцу в Телеграм, раз в три часа", () => {
+  run("var __ув = []; var __старУв = Уведомить_; Уведомить_ = function (t, k) { __ув.push(t); return 'ok'; };");
+  run("Object.keys(props_().getProperties()).forEach(function(k){ if (k.indexOf('APP_ACK')===0) props_().deleteProperty(k); })");
+  run(`props_().setProperty('APP_ACK:OLD1', JSON.stringify({ к: 'Слесарь', t: 'Поручение от мастера', at: Date.now() - 15 * 60000, n: ${N} }))`);
+  run("Прил_контрольДоставки_(new Date())");
+  eq(j("__ув").length, 0, "тревога про телефон, который ни разу не подтверждал (старая версия)");
+  run("props_().setProperty('APP_ACKSEEN:Слесарь', String(Date.now() - 864e5))");
+  run(`props_().setProperty('APP_ACK:OLD2', JSON.stringify({ к: 'Слесарь', t: 'Поручение от мастера', at: Date.now() - 15 * 60000, n: ${N} }))`);
+  run(`props_().setProperty('APP_ACK:NEW1', JSON.stringify({ к: 'Слесарь', t: 'свежее', at: Date.now() - 60000 }))`);
+  run("Прил_контрольДоставки_(new Date())");
+  const ув = j("__ув");
+  eq(ув.length, 1, "сообщений"); truthy(/Слесарь не получил/.test(ув[0]) && /позвонить/.test(ув[0]), ув[0]);
+  truthy(ackKeys().includes("APP_ACK:NEW1"), "свежее ожидание снято раньше времени");
+  run(`props_().setProperty('APP_ACK:OLD3', JSON.stringify({ к: 'Слесарь', t: 'ещё', at: Date.now() - 15 * 60000 }))`);
+  run("Прил_контрольДоставки_(new Date())");
+  eq(j("__ув").length, 1, "повторная тревога раньше трёх часов");
+  return ув[0].slice(0, 90) + "…";
+});
+check("напоминания: за час до срока, непрочитанное поручение, утро, конец смены — по разу", () => {
+  post({ a: "flush", s: OWN });
+  run("Object.keys(props_().getProperties()).forEach(function(k){ if (k.indexOf('APP_REM:')===0) props_().deleteProperty(k); })");
+  const soon = new Date(Date.now() + 40 * 60000).toISOString();
+  const d = post({ a: "taskSave", s: OWN, task: { text: "Скоро срок", to: "Слесарь", due: soon } }).created;
+  post({ a: "flush", s: OWN });
+  /* отправлено 40 минут назад и не прочитано */
+  run(`(function(){var sh=sheet_('Поручения',COL_ППОР);var v=sh.getRange(2,1,sh.getLastRow()-1,4).getValues();
+    v.forEach(function(r,i){ if(Number(r[0])===${d}) sh.getRange(i+2,4).setValue(Utilities.formatDate(new Date(Date.now()-40*60000),'','dd.MM.yyyy HH:mm')); });})()`);
+  run(`props_().setProperty('APP_ENDS', JSON.stringify({ д: Utilities.formatDate(new Date(), '', 'yyyy-MM-dd'), e: { 'Слесарь': Date.now() + 8 * 60000 } }))`);
+  pushes.length = 0;
+  const said = j("Прил_напоминания_(new Date())");
+  const tp = topics();
+  truthy(tp.includes("wrk2:task-" + d), "исполнителю ни срок, ни повтор: " + tp.join(" "));
+  truthy(tp.includes("own:task-" + d), "владельцу про непрочитанное: " + tp.join(" "));
+  truthy(tp.includes("wrk2:report"), "рабочему «отчитаться»: " + tp.join(" "));
+  truthy(said.some((x) => /^срок/.test(x)) && said.some((x) => /^непрочитано/.test(x)), said.join(", "));
+  pushes.length = 0;
+  run("Прил_напоминания_(new Date())");
+  eq(pushes.length, 0, "повтор тех же напоминаний");
+  /* утро: 07:50 */
+  const m = new Date(); m.setHours(7, 50, 0, 0);
+  run("props_().deleteProperty('APP_ENDS')");
+  pushes.length = 0;
+  run(`Прил_напоминания_(new Date(${m.getTime()}))`);
+  truthy(topics().includes("own:morning"), "утренней сводки нет: " + topics().join(" "));
+  return said.join(", ");
+});
+check("тихие часы глушат напоминания, но не проблему", () => {
+  post({ a: "settingsSave", s: OWN, settings: { quiet: true } });
+  const night = new Date(); night.setHours(23, 30, 0, 0);
+  run("Object.keys(props_().getProperties()).forEach(function(k){ if (k.indexOf('APP_REM:')===0) props_().deleteProperty(k); })");
+  run(`var __д = Date; Прил_тихо_ = (function (old) { return function (s, d) { return old(s, d || new Date(${night.getTime()})); }; })(Прил_тихо_);`);
+  pushes.length = 0;
+  run(`Прил_напоминания_(new Date(${night.getTime()}))`);
+  eq(pushes.length, 0, "ночью ушло");
+  post({ a: "mark", s: WRK, op: WOP, what: "problem", text: "ночная авария" });
+  post({ a: "flush", s: WRK });
+  truthy(topics().some((t) => t.startsWith("own:fact-")), "проблема ночью не дошла");
+  post({ a: "settingsSave", s: OWN, settings: { quiet: false } });
+});
+check("недельный отчёт — push «Недельный отчёт», выключается отдельно", () => {
+  pushes.length = 0;
+  run("__старУв('Неделя 22.09–28.09\\n\\nСделано: 5', 'done')");
+  truthy(topics().includes("own:weekly"), "нет push: " + topics().join(" "));
+  post({ a: "settingsSave", s: OWN, settings: { weekly: false } });
+  pushes.length = 0;
+  run("__старУв('Неделя 22.09–28.09\\n\\nСделано: 5', 'done')");
+  eq(pushes.length, 0, "ушло, хотя выключено");
+  post({ a: "settingsSave", s: OWN, settings: { weekly: true } });
+});
+check("ответ приложения сообщает время сервера", () => { truthy(post({ a: "load", s: OWN }).ms >= 0, "нет ms"); });
 
 console.log(`\nИтого: ${ok} прошло, ${bad} упало`);
 process.exit(bad ? 1 : 0);
