@@ -45,13 +45,13 @@ var ПРИЛ_ВЛАДЕЛЕЦ = 'владелец';
 var ПРИЛ_ВХОДОВ = 3;          // на сколько телефонов (или Safari + иконка) годится один код
 var ПРИЛ_ДНЕЙ_ВХОДА = 90;     // вход, которым не пользовались столько дней, выключается
 var ПРИЛ_ПРАВКИ = { decide: 1, undecide: 1, mark: 1, taskSave: 1, taskUpdate: 1, taskComment: 1,
-  taskRead: 1, settingsSave: 1 };
+  taskRead: 1, settingsSave: 1, checklistSave: 1, moveApply: 1 };
 
 /* ------------------------------------------------ память одного запроса
    Всё, что прочитано за запрос, живёт здесь и выбрасывается в конце.
    отложить — push и Телеграм не слать сейчас, а поставить в очередь. */
 var __прил = null;
-function Прил_забыть_() { if (__прил) { __прил.св = null; __прил.листы = {}; } }
+function Прил_забыть_() { if (__прил) { __прил.св = null; __прил.листы = {}; __прил.план = null; } }
 
 /* Все свойства скрипта одним обращением. */
 function Прил_св_() {
@@ -125,16 +125,21 @@ function Прил_действие_(a, p) {
       return Прил_вид_(me);
     case 'decide': if (!вл) break; Прил_решить_(Number(String(p.id).replace(/^f/, '')), !!p.yes, me.name); return сделано();
     case 'undecide': if (!вл) break; Прил_отменить_(Number(String(p.id).replace(/^f/, ''))); return сделано();
-    case 'mark': Прил_отметка_(me, s_(p.op), s_(p.what), s_(p.text)); return сделано();
+    case 'mark': Прил_отметка_(me, s_(p.op), s_(p.what), s_(p.text), { qty: p.qty, scrap: p.scrap, photo: p.photo, check: p.check }); return сделано();
     case 'taskSave': if (!вл) break; return сделано(Прил_задача_(me, p.task || {}));
     case 'taskUpdate': Прил_задачаПравка_(me, p); return сделано();
-    case 'taskComment': Прил_задачаСлово_(me, Number(p.n), s_(p.text)); return сделано();
+    case 'taskComment': Прил_задачаСлово_(me, Number(p.n), s_(p.text), p.photo); return сделано();
     case 'taskRead': Прил_прочитал_(me, Number(p.n)); return сделано();
     case 'settingsSave': if (!вл) break; Прил_настройки_(p.settings || {}); return сделано();
     case 'issueCode': if (!вл) break; return Прил_выдатьКод_(s_(p.name), s_(p.role) === 'owner' ? 'owner' : 'worker');
     case 'sessions': return { sessions: Прил_входы_(me) };
     case 'revoke': Прил_отключить_(me, Number(p.row)); return { sessions: Прил_входы_(me) };
     case 'flush': __прил.отложить = false; return { ok: true, sent: Прил_разослать_() };
+    case 'photo': return { id: s_(p.id), data: Прил_фотоВзять_(s_(p.id)) };
+    case 'orderInfo': return Прил_заказИнфо_(me, s_(p.order));
+    case 'checklistSave': if (!вл) break; Прил_чекЛистЗаписать_(s_(p.res), p.items || []); return сделано();
+    case 'movePreview': if (!вл) break; return Прил_сдвиг_(s_(p.op), s_(p.start), false, me.name);
+    case 'moveApply': if (!вл) break; var сд = Прил_сдвиг_(s_(p.op), s_(p.start), true, me.name); var v2 = сделано(); v2.moved = сд; return v2;
     case 'pushKey': return { key: ВебПуш_публичный_() };
     case 'pushSubscribe': Прил_подписка_(me, p.sub || {}, s_(p.ua)); return { ok: true };
     case 'pushTest':
@@ -382,7 +387,8 @@ function Прил_задачиДляВида_() {
   var комм = {};
   Прил_лист_('комм').объекты().forEach(function (r) {
     var n = n_(r['Номер задачи'], 0);
-    if (n) (комм[n] = комм[n] || []).push({ ts: Прил_iso_(датаКлетки_(r['Время'])), who: s_(r['Кто']), text: s_(r['Комментарий']) });
+    if (n) (комм[n] = комм[n] || []).push({ ts: Прил_iso_(датаКлетки_(r['Время'])), who: s_(r['Кто']),
+      text: Прил_безФото_(r['Комментарий']), photos: Прил_фотоИз_(r['Комментарий']) });
   });
   return Прил_лист_('задачи').объекты().map(function (r) {
     var n = n_(r['Номер'], 0), x = пор[n] || {};
@@ -400,9 +406,12 @@ function Прил_задачиДляВида_() {
 function Прил_видОтметки_(f) {
   var n = s_(f.note);
   if (/^проблема:/i.test(n)) return 'problem';
+  if (/^пауза:/i.test(n)) return 'pause';
+  if (/^продолжил/i.test(n)) return 'resume';
   if (f.moveTo) return 'move';
-  if (s_(f.scrap)) return 'scrap';
+  /* «Закончил» с браком — это всё равно «Закончил»: брак едет вместе с ним. */
   if (f.finish && f.progress === 100) return 'done';
+  if (s_(f.scrap)) return 'scrap';
   if (f.start && !f.finish) return 'start';
   return 'comment';
 }
@@ -412,15 +421,24 @@ var ПРИЛ_ПОСЛЕДСТВИЯ = {
   scrap: 'Брак запишется в примечание операции.',
   done: 'Операция закроется, следующие пойдут по плану.',
   start: 'Отметится фактическое начало операции.',
+  pause: 'Операция встанет в плане «приостановлено» с этой причиной.',
+  resume: 'Операция снова «в работе».',
   comment: '',
 };
 function Прил_текстОтметки_(f) {
-  var n = s_(f.note).replace(/^(проблема|комментарий|брак):\s*/i, '');
+  var n = Прил_безФото_(f.note).replace(/^(проблема|комментарий|брак|пауза):\s*/i, '');
   /* «Начал» и «Закончил» без слов — это не слова рабочего, их и так говорит
-     ярлык карточки; в кавычках показываем только то, что человек написал. */
-  if (/^(отмечено начало|сдано) со смены|^отметка из Telegram$/.test(n)) n = '';
+     ярлык карточки; в кавычках показываем только то, что человек написал
+     (и что он добавил к отметке: сколько сделал, чек-лист). */
+  n = n.replace(/^(отмечено начало|сдано) со смены( \(приложение\))?(\s*[:·]\s*)?/, '').replace(/^отметка из Telegram$/, '');
+  if (s_(f.scrap) && Прил_видОтметки_(f) === 'done') n = (n ? n + ', ' : '') + 'брак ' + s_(f.scrap) + ' шт';
   return n;
 }
+/* Фото в тексте хранится меткой «[фото: 12-ab3cd9]»: так снимок виден и в
+   планировщике (есть метка — есть фото), а лишних листов читать не надо. */
+var ПРИЛ_ФОТО_МЕТКА = /\s*\[фото: ([\w-]+)\]/g;
+function Прил_фотоИз_(t) { var out = [], m; ПРИЛ_ФОТО_МЕТКА.lastIndex = 0; while ((m = ПРИЛ_ФОТО_МЕТКА.exec(s_(t)))) out.push(m[1]); return out; }
+function Прил_безФото_(t) { return s_(t).replace(ПРИЛ_ФОТО_МЕТКА, '').trim(); }
 
 /* ------------------------------------------------ план — один раз на версию
    Журнал выполнения за 28.09 показал, откуда «пять секунд»: каждый запрос
@@ -530,6 +548,8 @@ function Прил_вид_(me) {
     if (вид === 'start') { x.start = f.start; }
     if (вид === 'done') { x.done = true; }
     if (вид === 'problem') { x.problem = Прил_текстОтметки_(f); x.problemAt = Прил_iso_(f.ts); }
+    if (вид === 'pause') { x.pause = Прил_текстОтметки_(f); x.pauseAt = Прил_iso_(f.ts); }
+    if (вид === 'resume') { x.pause = ''; x.pauseAt = ''; x.resumed = true; }
   });
   var мои = Прил_мойУчасток_(me, часть);
   var ops = [];
@@ -538,20 +558,26 @@ function Прил_вид_(me) {
     var st = o.status, начато = o.factStart;
     var x = поверх[o.code] || {};
     if (x.start && st === 'план') { st = 'в работе'; начато = Прил_iso_(x.start); }
+    if (x.resumed && st === 'пауза') st = 'в работе';
+    if (x.pause && st !== 'выполнено') st = 'пауза';
     if (x.problem && st !== 'выполнено') st = 'проблема';
-    if (x.done && (st === 'в работе' || st === 'план')) st = 'ждёт решения';
+    if (x.done && (st === 'в работе' || st === 'план' || st === 'пауза')) st = 'ждёт решения';
     ops.push({
-      code: o.code, order: o.order, op: o.op, part: o.part, res: o.res, start: o.start, end: o.end,
+      code: o.code, order: o.order, op: o.op, part: o.part, res: o.res, machine: o.machine || '', start: o.start, end: o.end,
       status: st, pct: o.pct, factStart: начато, problem: x.problem || o.problem || '', problemAt: x.problemAt || '',
-      pending: !!(x.start || x.done || x.problem),
+      pause: x.pause || '', pauseAt: x.pauseAt || '',
+      pending: !!(x.start || x.done || x.problem || x.pause || x.resumed),
     });
   });
   var задачи = Прил_задачиДляВида_();
 
+  var чек = Прил_чекЛисты_();
   if (me.role === 'worker') {
+    var мойЧек = {};
+    Object.keys(чек).forEach(function (k) { if (k === ПРИЛ_ВСЕ || !мои || !мои.length || мои.indexOf(k) >= 0) мойЧек[k] = чек[k]; });
     return {
       me: { role: 'worker', name: me.name, id: me.name }, now: new Date().toISOString(),
-      ops: ops, orders: часть.orders,
+      ops: ops, orders: часть.orders, checklists: мойЧек,
       tasks: задачи.filter(function (t) { return t.to === me.name; }),
     };
   }
@@ -560,13 +586,13 @@ function Прил_вид_(me) {
     var imp = ПРИЛ_ПОСЛЕДСТВИЯ[вид];
     if (вид === 'move' && f.moveTo) imp = 'Операция начнётся не раньше ' + f.moveTo.split('-').reverse().join('.') + ', план пересчитается.';
     return { id: 'f' + f.row, kind: вид, who: f.who, at: Прил_iso_(f.ts), opCode: f.op,
-      text: Прил_текстОтметки_(f), impact: imp };
+      text: Прил_текстОтметки_(f), impact: imp, photos: Прил_фотоИз_(f.note) };
   });
   return {
     me: { role: 'owner', name: me.name, id: 'owner' }, now: new Date().toISOString(),
     people: часть.people, resources: часть.resources, orders: часть.orders, ops: ops,
     pending: pending, decided: Прил_решённые_(фактСтроки, 12), tasks: задачи,
-    settings: Прил_настройкиВсе_(),
+    settings: Прил_настройкиВсе_(), checklists: чек,
   };
 }
 
@@ -586,7 +612,7 @@ function Прил_решённые_(rows, сколько) {
     var f = { start: s_(r[Ф.НАЧАЛО]), finish: s_(r[Ф.КОНЕЦ]), progress: r[Ф.ПРОЦ] === '' || r[Ф.ПРОЦ] == null ? null : n_(r[Ф.ПРОЦ], 0),
       scrap: s_(r[Ф.БРАК]), note: s_(r[Ф.ЗАМЕТКА]), moveTo: s_(r[Ф.ПЕРЕНОС]) };
     out.push({ id: 'f' + (i + 2), kind: Прил_видОтметки_(f), who: s_(r[Ф.КТО]), at: Прил_iso_(r[Ф.ВРЕМЯ]),
-      opCode: s_(r[Ф.ОП]), text: Прил_текстОтметки_(f),
+      opCode: s_(r[Ф.ОП]), text: Прил_текстОтметки_(f), photos: Прил_фотоИз_(f.note),
       result: s_(r[Ф.РЕШЕНИЕ]) === РЕШЕНО_ДА ? 'принято' : 'не принято', decidedAt: Прил_iso_(r[Ф.ПРИМЕНЕНО]) });
   }
   return out;
@@ -622,13 +648,20 @@ function Прил_решить_(row, да, кто) {
       else if ((st || pr !== null) && !ужеГотова) op.status = 'в работе';
       var пер = d_(r[Ф.ПЕРЕНОС]);
       if (пер) { op.constraintType = 'SNET'; op.constraintDate = пер + 'T00:00'; }
+      note = Прил_безФото_(note);
       if (/^проблема:/i.test(note)) {
         op.status = 'есть проблема';
         op.problem = note.replace(/^проблема:\s*/i, '');
         if (!op.factStart) op.factStart = isoDT_(new Date());
+      } else if (/^пауза:/i.test(note)) {
+        if (!ужеГотова) op.status = 'приостановлено';
+        op.note = (op.note ? op.note + ' · ' : '') + note;
+      } else if (/^продолжил/i.test(note)) {
+        if (!ужеГотова) op.status = 'в работе';
       } else {
         var add = [note.replace(/^(комментарий|брак):\s*/i, ''), scrap ? 'брак ' + scrap + ' шт' : '']
-          .filter(function (x) { return x && !/^(отмечено начало|сдано) со смены|^отметка из Telegram$/.test(x); }).join('; ');
+          .map(function (x) { return x.replace(/^(отмечено начало|сдано) со смены( \(приложение\))?(\s*[:·]\s*)?/, '').replace(/^отметка из Telegram$/, ''); })
+          .filter(function (x) { return x; }).join('; ');
         if (add) op.note = (op.note ? op.note + ' · ' : '') + add;
       }
       var computed = computeServer_(plan);
@@ -654,7 +687,8 @@ function Прил_отменить_(row) {
 }
 
 /* ------------------------------------------------------------- отметки смены */
-function Прил_отметка_(me, op, что, текст) {
+function Прил_отметка_(me, op, что, текст, доп) {
+  доп = доп || {};
   if (!op) throw Прил_ошибка_('Не сказано, по какой операции');
   /* Рабочий отмечает только своё. Экран и так показывает ему только его
      станки, но запрос можно собрать руками — проверяем и здесь. */
@@ -668,25 +702,38 @@ function Прил_отметка_(me, op, что, текст) {
   }
   var кто = me.name;
   var сейчас = isoDT_(new Date());
+  var фото = доп.photo ? ' [фото: ' + Прил_фотоСохранить_(me, доп.photo, 'отметка ' + op) + ']' : '';
   var f;
-  if (что === 'start') f = { who: кто, op: op, start: сейчас, finish: '', progress: 1, note: 'отмечено начало со смены (приложение)' };
-  else if (что === 'finish') f = { who: кто, op: op, start: '', finish: сейчас, progress: 100, note: 'сдано со смены (приложение)' };
-  else if (что === 'problem') {
+  if (что === 'start') {
+    var чл = s_(доп.check);
+    f = { who: кто, op: op, start: сейчас, finish: '', progress: 1,
+      note: 'отмечено начало со смены (приложение)' + (/^\d+\/\d+$/.test(чл) ? ' · чек-лист ' + чл : '') + фото };
+  } else if (что === 'finish') {
+    var шт = Math.max(0, Math.round(n_(доп.qty, 0))), брак = Math.max(0, Math.round(n_(доп.scrap, 0)));
+    f = { who: кто, op: op, start: '', finish: сейчас, progress: 100, scrap: брак ? String(брак) : '',
+      note: 'сдано со смены (приложение)' + (шт ? ': сделано ' + шт + ' шт' : '') + фото };
+  } else if (что === 'problem') {
     if (!текст) throw Прил_ошибка_('Напишите, что случилось');
-    f = { who: кто, op: op, start: '', finish: '', progress: null, scrap: '', note: 'проблема: ' + текст };
+    f = { who: кто, op: op, start: '', finish: '', progress: null, scrap: '', note: 'проблема: ' + текст + фото };
+  } else if (что === 'pause') {
+    if (!текст) throw Прил_ошибка_('Выберите причину паузы');
+    f = { who: кто, op: op, start: '', finish: '', progress: null, scrap: '', note: 'пауза: ' + текст + фото };
+  } else if (что === 'resume') {
+    f = { who: кто, op: op, start: '', finish: '', progress: null, scrap: '', note: 'продолжил работу' + (текст ? ': ' + текст : '') };
   } else if (что === 'comment') {
-    if (!текст) throw Прил_ошибка_('Пустой комментарий');
-    f = { who: кто, op: op, start: '', finish: '', progress: null, scrap: '', note: 'комментарий: ' + текст };
+    if (!текст && !фото) throw Прил_ошибка_('Пустой комментарий');
+    f = { who: кто, op: op, start: '', finish: '', progress: null, scrap: '', note: 'комментарий: ' + (текст || 'фото') + фото };
   } else throw Прил_ошибка_('Неизвестная отметка');
   appendFact_(f);
-  var слова = { start: 'начал', finish: 'закончил', problem: 'ПРОБЛЕМА', comment: 'пишет' }[что];
+  var слова = { start: 'начал', finish: 'закончил', problem: 'ПРОБЛЕМА', comment: 'пишет', pause: 'пауза', resume: 'продолжил' }[что];
+  var хвост = что === 'finish' ? [доп.qty ? 'сделано ' + доп.qty + ' шт' : '', n_(доп.scrap, 0) ? 'брак ' + доп.scrap + ' шт' : ''].filter(String).join(', ') : '';
   var p = {
-    title: (что === 'problem' ? '⚠️ ' : '') + кто + ': ' + слова + ' · ' + op,
-    body: текст || (что === 'finish' ? 'Нужно ваше решение: принять в план?' : 'Отметка со смены'),
+    title: (что === 'problem' ? '⚠️ ' : что === 'pause' ? '⏸ ' : '') + кто + ': ' + слова + ' · ' + op,
+    body: (текст || хвост || (что === 'finish' ? 'Нужно ваше решение: принять в план?' : 'Отметка со смены')) + (фото ? ' · 📷 фото' : ''),
     url: '#/replies', tag: 'fact-' + op, kind: что === 'problem' ? 'problem' : 'answer',
   };
   Прил_пуш_(ПРИЛ_ВЛАДЕЛЕЦ, p, что === 'problem' ? 'problem' : 'answers');
-  Прил_телеграм_(p.title + (текст ? '\n' + текст : ''), что === 'problem' ? 'warn' : 'wait');
+  Прил_телеграм_(p.title + (текст || хвост ? '\n' + (текст || хвост) : '') + (фото ? '\n(фото — в приложении)' : ''), что === 'problem' ? 'warn' : 'wait');
 }
 
 /* ---------------------------------------------------------------- задачи */
@@ -736,8 +783,12 @@ function Прил_задача_(me, t) {
       'Отправлено': кому ? Прил_сейчас_() : '', 'Доставлено': '', 'Прочитано': '', 'Взял': '',
       'Срок время': Прил_времяСрока_(t.due) });
   } finally { lock.releaseLock(); }
+  if (t.photo) {
+    appendRow_(SH.TCOM, COL_TCOM, { 'Номер задачи': задача.n, 'Время': Прил_сейчас_(), 'Кто': me.name,
+      'Комментарий': 'фото [фото: ' + Прил_фотоСохранить_(me, t.photo, 'задача ' + задача.n) + ']' });
+  }
   if (кому) {
-    Прил_пуш_(кому, { title: 'Поручение от мастера', body: текст + (задача.due ? ' · срок ' + задача.due.split('-').reverse().slice(0, 2).join('.') : ''),
+    Прил_пуш_(кому, { title: 'Поручение от мастера', body: текст + (t.photo ? ' · 📷 фото' : '') + (задача.due ? ' · срок ' + задача.due.split('-').reverse().slice(0, 2).join('.') : ''),
       url: '#/task/' + задача.n, tag: 'task-' + задача.n, kind: 'task', n: задача.n }, 'workerNew');
     Прил_вОчередьДело_({ k: 'раб', кому: кому, text: 'Поручение от мастера (№' + задача.n + '): ' + текст });
   } else {
@@ -823,13 +874,16 @@ function Прил_состояние_(n, куда, кто) {
   } finally { lock.releaseLock(); }
 }
 
-function Прил_задачаСлово_(me, n, текст) {
-  if (!текст) throw Прил_ошибка_('Пустой комментарий');
+function Прил_задачаСлово_(me, n, текст, фотоДанные) {
+  var фото = фотоДанные ? ' [фото: ' + Прил_фотоСохранить_(me, фотоДанные, 'задача ' + n) + ']' : '';
+  if (!текст && !фото) throw Прил_ошибка_('Пустой комментарий');
+  if (!текст) текст = 'фото';
   var t = задачи_(true, true).filter(function (x) { return x.n === n; })[0];
   if (!t) throw Прил_ошибка_('Задачи №' + n + ' нет');
   var пор = Прил_поручения_()[n] || {};
   if (me.role === 'worker' && пор.to !== me.name) throw Прил_ошибка_('Это поручение не вам');
-  appendRow_(SH.TCOM, COL_TCOM, { 'Номер задачи': n, 'Время': Прил_сейчас_(), 'Кто': me.name, 'Комментарий': текст });
+  appendRow_(SH.TCOM, COL_TCOM, { 'Номер задачи': n, 'Время': Прил_сейчас_(), 'Кто': me.name, 'Комментарий': текст + фото });
+  if (фото) текст += ' · 📷 фото';
   if (me.role === 'worker') {
     Прил_пуш_(ПРИЛ_ВЛАДЕЛЕЦ, { title: me.name + ' пишет по задаче', body: текст, url: '#/task/' + n, tag: 'task-' + n }, 'taskReply');
     Прил_телеграм_(me.name + ' по задаче №' + n + ' (' + t.text + '):\n' + текст, 'ask');
@@ -1068,6 +1122,235 @@ function Прил_пушВладельцу_(text, kind) {
   if (s_(kind) === 'done' && /^Неделя /.test(t)) { шапка = 'Недельный отчёт'; настройка = 'weekly'; tag = 'weekly'; }
   Прил_пуш_(ПРИЛ_ВЛАДЕЛЕЦ, { title: шапка, body: t.slice(0, 180), url: '#/today', tag: tag,
     kind: kind === 'warn' ? 'problem' : 'note' }, настройка);
+}
+
+
+/* ================================================================ ВОЛНА 2
+   Фото, документы заказа у станка, чек-листы, сдвиг этапа из плана. */
+
+/* ------------------------------------------------------------------ фото
+   Снимки лежат в отдельной таблице «РЗДС — фото приложения» в Диске
+   владельца, по строке на снимок: base64 кусками по 45 000 знаков (в
+   клетку влезает 50 000). Почему не папкой с файлами: для папки скрипту
+   нужно новое разрешение Google на Диск, а до того как владелец нажмёт
+   «Разрешить», падают все запуски от его имени — бот, утренняя рассылка,
+   часы приложения (решение 29.09, записано и в Archive.gs у apiDocAdd).
+   Таблицу скрипт заводит сам, с разрешением, которое у него уже есть.
+
+   Номер снимка — «строка-ключ»: строку находим сразу, а случайный ключ не
+   даёт перебором достать чужие снимки. Отдаётся снимок только по входу. */
+var ПРИЛ_ФОТО_КУСОК = 45000, ПРИЛ_ФОТО_МАКС = 2500000;
+function Прил_фотоТаблица_() {
+  var pr = props_(), id = pr.getProperty('APP_PHOTO_SS'), ss = null;
+  if (id) { try { ss = SpreadsheetApp.openById(id); } catch (e) { ss = null; } }
+  if (!ss) {
+    ss = SpreadsheetApp.create('РЗДС — фото приложения');
+    var sh0 = ss.getSheets()[0];
+    sh0.setName('Фото');
+    sh0.getRange(1, 1, 1, 6).setValues([['Когда', 'Кто', 'К чему', 'Ключ', 'Тип', 'Данные (кусками вправо)']]).setFontWeight('bold');
+    sh0.setFrozenRows(1);
+    pr.setProperty('APP_PHOTO_SS', ss.getId());
+  }
+  return ss.getSheets()[0];
+}
+function Прил_фотоСохранить_(me, данные, кЧему) {
+  var m = s_(данные).match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+\/=]+)$/);
+  if (!m) throw Прил_ошибка_('Фото не прочиталось — снимите ещё раз');
+  if (m[2].length > ПРИЛ_ФОТО_МАКС) throw Прил_ошибка_('Фото слишком большое');
+  var куски = [];
+  for (var i = 0; i < m[2].length; i += ПРИЛ_ФОТО_КУСОК) куски.push(m[2].slice(i, i + ПРИЛ_ФОТО_КУСОК));
+  var ключ = Прил_код_().toLowerCase();
+  var sh = Прил_фотоТаблица_();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw Прил_ошибка_('Сервер занят, попробуйте ещё раз');
+  try {
+    sh.appendRow([Прил_сейчас_(), me.name, s_(кЧему), ключ, m[1]].concat(куски));
+    return sh.getLastRow() + '-' + ключ;
+  } finally { lock.releaseLock(); }
+}
+function Прил_фотоВзять_(id) {
+  var m = s_(id).match(/^(\d+)-([a-z0-9]{6})$/);
+  if (!m) throw Прил_ошибка_('Нет такого фото');
+  var кэш = CacheService.getScriptCache(), k = 'app:photo:' + id;
+  var был = Прил_кэшВзять_(кэш, k);
+  if (был) return был;
+  var sh = Прил_фотоТаблица_(), r = Number(m[1]);
+  if (r < 2 || r > sh.getLastRow()) throw Прил_ошибка_('Нет такого фото');
+  var v = sh.getRange(r, 1, 1, sh.getLastColumn()).getValues()[0];
+  if (s_(v[3]) !== m[2]) throw Прил_ошибка_('Нет такого фото');
+  var данные = 'data:' + (s_(v[4]) || 'image/jpeg') + ';base64,' + v.slice(5).map(s_).join('');
+  Прил_кэшПоложить_(кэш, k, данные, 21600);
+  return данные;
+}
+
+/* ------------------------------------------------ документы заказа у станка
+   Всё, что владелец завёл в реестре к заказу: ссылки на чертёж, УП, карту
+   наладки (лист «Документы заказов») и паспорт (технология, заготовки,
+   режимы, инструмент). Плюс прошлые заказы той же детали — там уже
+   записано, как её делали. Рабочему — только по заказам его участка. */
+function Прил_заказИнфо_(me, заказ) {
+  if (!заказ) throw Прил_ошибка_('Не сказано, какой заказ');
+  var часть = Прил_планЧасть_();
+  var паспорта = паспорта_();
+  var документы = документыЗаказов_();
+  var имя = ((часть.orders.filter(function (o) { return o.code === заказ; })[0] || {}).name) ||
+    ((паспорта[заказ] || {})['Наименование']) || '';
+  var мои = Прил_мойУчасток_(me, часть);
+  if (me.role === 'worker' && мои && мои.length) {
+    var свои = {};
+    часть.ops.forEach(function (o) { if (мои.indexOf(o.machine) >= 0 || мои.indexOf(o.worker) >= 0) свои[o.order] = 1; });
+    /* Прошлый заказ той же детали рабочему тоже можно — ради него он и открывает. */
+    var родня = Object.keys(свои).some(function (k) {
+      var n = ((часть.orders.filter(function (o) { return o.code === k; })[0] || {}).name) || '';
+      return n && n === ((паспорта[заказ] || {})['Наименование']);
+    });
+    if (!свои[заказ] && !родня) throw Прил_ошибка_('Этот заказ не на вашем участке');
+  }
+  var пасп = паспорта[заказ] || null;
+  var чисто = function (p) {
+    if (!p) return null;
+    var o = {};
+    ['Наименование', 'Заказчик', 'Количество', 'Детали', 'Маршрут', 'Технология', 'Заготовки', 'Режимы резания',
+      'Инструмент', 'Прочее', 'Выполнен'].forEach(function (k) { if (s_(p[k])) o[k] = s_(p[k]); });
+    return Object.keys(o).length ? o : null;
+  };
+  var норм = function (t) { return s_(t).toLowerCase().replace(/\s+/g, ' '); };
+  var раньше = [];
+  if (имя) {
+    Object.keys(паспорта).forEach(function (k) {
+      if (k === заказ) return;
+      var p = паспорта[k];
+      if (норм(p['Наименование']) === норм(имя) || (s_(p['Детали']) && норм(p['Детали']) === норм((пасп || {})['Детали'])))
+        раньше.push({ order: k, name: s_(p['Наименование']), finished: s_(p['Выполнен']), docs: (документы[k] || []).length });
+    });
+    раньше.sort(function (a, b) { return String(b.finished).localeCompare(String(a.finished)); });
+  }
+  return {
+    order: заказ, name: имя, passport: чисто(пасп),
+    docs: (документы[заказ] || []).filter(function (d) { return /^https?:\/\//i.test(d.url); })
+      .map(function (d) { return { kind: d.kind, title: d.title, url: d.url }; }),
+    earlier: раньше.slice(0, 5),
+  };
+}
+
+/* ------------------------------------------------------------- чек-листы
+   Лист «Чек-листы»: станок (или «все»), пункт, порядок. Перед «Начал»
+   рабочий отмечает все пункты своего станка — без этого кнопка не нажмётся.
+   Сколько пунктов отмечено, ложится в «Факт» вместе с «Начал». */
+var ПРИЛ_ЧЕК = 'Чек-листы', COL_ПЧЕК = ['Станок', 'Пункт', 'Порядок'], ПРИЛ_ВСЕ = 'все';
+ПРИЛ_ЛИСТЫ.чек = function () { return [ПРИЛ_ЧЕК, COL_ПЧЕК]; };
+/* Чек-листы меняются редко, а нужны в каждом ответе — держим в кэше
+   10 минут; правка из приложения кэш сбрасывает сразу. */
+function Прил_чекЛисты_() {
+  var c = CacheService.getScriptCache(), был = c.get('app:chk');
+  if (был) { try { return JSON.parse(был); } catch (e) {} }
+  var по = Прил_чекЛистыЧитать_();
+  try { c.put('app:chk', JSON.stringify(по), 600); } catch (e) {}
+  return по;
+}
+function Прил_чекЛистыЧитать_() {
+  var по = {};
+  Прил_лист_('чек').объекты().forEach(function (r) {
+    var ст = s_(r['Станок']), п = s_(r['Пункт']);
+    if (!ст || !п) return;
+    if (ст.toLowerCase() === ПРИЛ_ВСЕ) ст = ПРИЛ_ВСЕ;
+    (по[ст] = по[ст] || []).push({ text: п, order: n_(r['Порядок'], 0) });
+  });
+  Object.keys(по).forEach(function (k) {
+    по[k] = по[k].sort(function (a, b) { return a.order - b.order; }).map(function (x) { return x.text; });
+  });
+  return по;
+}
+function Прил_чекЛистЗаписать_(станок, пункты) {
+  if (!станок) throw Прил_ошибка_('Не сказано, для какого станка');
+  if (станок.toLowerCase() === ПРИЛ_ВСЕ) станок = ПРИЛ_ВСЕ;
+  var чисто = (пункты || []).map(s_).filter(String).slice(0, 30).map(function (t) { return t.slice(0, 200); });
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw Прил_ошибка_('Таблица занята, попробуйте ещё раз');
+  try {
+    sheet_(ПРИЛ_ЧЕК, COL_ПЧЕК);
+    var rows = readTable_(ПРИЛ_ЧЕК, COL_ПЧЕК).filter(function (r) {
+      var ст = s_(r['Станок']);
+      return (ст.toLowerCase() === ПРИЛ_ВСЕ ? ПРИЛ_ВСЕ : ст) !== станок;
+    });
+    чисто.forEach(function (t, i) { rows.push({ 'Станок': станок, 'Пункт': t, 'Порядок': i + 1 }); });
+    writeTable_(ПРИЛ_ЧЕК, COL_ПЧЕК, rows, 'чек-листы');
+    CacheService.getScriptCache().remove('app:chk');
+    if (__прил && __прил.листы) delete __прил.листы.чек;
+  } finally { lock.releaseLock(); }
+}
+
+/* ------------------------------------------------ сдвиг этапа из плана
+   Владелец тянет этап пальцем по ленте. Сначала — предпросмотр: движок
+   планировщика считает план с «начало не ранее …» у этого этапа и
+   показывает, что ещё сдвинется и к какому сроку выйдет каждый заказ.
+   Записывается только после «Сдвинуть» — тем же движком и под замком, как
+   решение по ответу со смены. Ограничение то же, что ставит перетаскивание
+   в самом планировщике (SNET): раньше, чем позволяют предыдущие этапы,
+   этап не встанет — предпросмотр покажет, где он окажется на самом деле. */
+function Прил_сдвиг_(код, начало, записать, кто) {
+  if (!код) throw Прил_ошибка_('Не сказано, какой этап');
+  var m = s_(начало).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/);
+  if (!m) throw Прил_ошибка_('Не понял время начала');
+  var было = {};
+  Прил_планЧасть_().ops.forEach(function (o) { было[o.code] = o; });
+  var lock = null;
+  if (записать) {
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) throw Прил_ошибка_('Таблица занята другой записью, попробуйте ещё раз');
+  }
+  try {
+    var plan = readPlan_();
+    var op = plan.operations.filter(function (o) { return o.id === код; })[0];
+    if (!op) throw Прил_ошибка_('Этапа ' + код + ' в плане больше нет');
+    if (op.status === 'завершено') throw Прил_ошибка_('Этап уже сделан — двигать нечего');
+    var прежде = { t: op.constraintType, d: op.constraintDate };
+    op.constraintType = 'SNET';
+    op.constraintDate = начало;
+    var eng = new Engine(plan);
+    eng.compute('strict');
+    var сдвинуто = [], конецЗаказа = {};
+    eng.ops.forEach(function (o) {
+      if (o.kind === 'stop' || !o.es || !o.ef) return;
+      if (!конецЗаказа[o.order] || o.ef > конецЗаказа[o.order]) конецЗаказа[o.order] = o.ef;
+      var b = было[o.id];
+      if (!b) return;
+      var d0 = new Date(b.start).getTime(), d1 = o.es.getTime();
+      if (Math.abs(d1 - d0) < 60000 && Math.abs(new Date(b.end).getTime() - o.ef.getTime()) < 60000) return;
+      сдвинуто.push({ code: o.id, order: o.order, op: o.stage || o.description || o.id, res: o.machine || o.worker || '—',
+        from: b.start, to: o.es.toISOString(), end: o.ef.toISOString(), me: o.id === код });
+    });
+    var сам = eng.ops.filter(function (o) { return o.id === код; })[0] || {};
+    var заказы = [];
+    var прежнийКонец = {};
+    Object.keys(было).forEach(function (k) {
+      var o = было[k];
+      if (!прежнийКонец[o.order] || o.end > прежнийКонец[o.order]) прежнийКонец[o.order] = o.end;
+    });
+    var тронуто = {};
+    сдвинуто.forEach(function (x) { тронуто[x.order] = 1; });
+    Object.keys(тронуто).forEach(function (k) {
+      var срок = eng.deadlines[k] ? new Date(eng.deadlines[k] + (String(eng.deadlines[k]).length <= 10 ? 'T23:59' : '')) : null;
+      var конец = конецЗаказа[k];
+      заказы.push({ code: k, was: прежнийКонец[k] || '', now: конец ? конец.toISOString() : '',
+        due: eng.deadlines[k] || '', late: !!(срок && конец && конец > срок) });
+    });
+    var итог = { op: код, asked: начало, start: сам.es ? сам.es.toISOString() : '', end: сам.ef ? сам.ef.toISOString() : '',
+      changed: сдвинуто.sort(function (a, b) { return a.to < b.to ? -1 : 1; }), orders: заказы, applied: false };
+    if (!записать) return итог;
+    var computed = computeServer_(plan);
+    writePlan_(plan, computed.rows);
+    props_().setProperty('PLAN_VERSION', String(planVersion_() + 1));
+    props_().setProperty('PLAN_SAVED_AT', new Date().toISOString());
+    try {
+      appendRow_(SH.LOG, COL_LOG, { 'Время': Прил_сейчас_(), 'Автор': кто + ' (приложение)', 'Объект': код,
+        'Причина': 'сдвиг этапа в приложении', 'Комментарий': 'начало не ранее ' + начало.replace('T', ' ') +
+          (прежде.d ? ' (было ' + прежде.t + ' ' + прежде.d + ')' : ''),
+        'Изменения': '', 'Перенесено операций': String(сдвинуто.length) });
+    } catch (e) {}
+    итог.applied = true;
+    return итог;
+  } finally { if (lock) lock.releaseLock(); }
 }
 
 /* ======================================================= часы приложения

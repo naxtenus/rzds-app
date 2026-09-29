@@ -5,6 +5,7 @@ import { esc, icon, initial } from '../util.js';
 import { weightLook, WEIGHTS } from '../ui.js';
 import { store } from '../store.js';
 import { calendar, calInit, calOn, calValue } from './calendar.js';
+import { pickPhoto, draftThumb } from '../photo.js';
 
 const nextMonday = () => { const d = new Date(); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); return d; };
 const pad = (n) => String(n).padStart(2, '0');
@@ -73,6 +74,12 @@ export function render() {
       <div class="chips">${[{ code: '' }].concat(d.orders || []).map((o) => `<button class="chip${o.code === f.order ? ' on' : ''}" style="height:40px" data-act="set" data-k="order" data-v="${esc(o.code)}" aria-pressed="${o.code === f.order}">${o.code ? esc(o.code) : 'Без заказа'}</button>`).join('')}</div>
     </section>
 
+    <section style="display:flex;flex-direction:column;gap:8px">
+      <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Фото</h2>
+      ${draftThumb(f.photo)}
+      <button class="btn" data-act="nt-photo" style="align-self:flex-start">${icon.camera(20)} ${f.photo ? 'Переснять' : 'Сфотографировать'}</button>
+    </section>
+
     <div class="info">${icon.bell(20)}<span>${isMe
       ? 'Напомню push-уведомлением за 1 час до срока.'
       : esc(person.name) + ' получит push сразу. Вы увидите, когда он прочитает и возьмёт в работу.'}</span></div>
@@ -83,6 +90,8 @@ export function render() {
 }
 
 export const on = {
+  'nt-photo': async () => { const p = await pickPhoto(); if (p) { draft().photo = p; store.emit(); } },
+  'ph-drop': () => { draft().photo = null; store.emit(); },
   'set': (el) => {
     const f = draft();
     f[el.dataset.k] = el.dataset.v;
@@ -113,6 +122,7 @@ export const on = {
       due = v.toISOString();
     }
     const task = { text, to: f.to, due, weight: f.weight, order: f.order };
+    if (f.photo) task.photo = f.photo;
     const tmp = -Date.now();
     const kept = JSON.parse(JSON.stringify(f));
     store.ui.draft = null;
@@ -120,7 +130,9 @@ export const on = {
     store.say(task.to ? 'Отправляю поручение…' : 'Сохраняю задачу…', 'wait');
     return store.act('taskSave', { task }, (d) => {
       const now = new Date().toISOString();
-      d.tasks.push(Object.assign({ n: tmp, state: 'открыта', comments: [], saving: true, delivery: task.to ? { sent: now } : undefined }, task));
+      const t = Object.assign({ n: tmp, state: 'открыта', comments: [], saving: true, delivery: task.to ? { sent: now } : undefined }, task);
+      delete t.photo;
+      d.tasks.push(t);
     }, task.to ? 'Поручено — уведомление ушло ✓' : 'Задача поставлена ✓').then((res) => {
       if (!res) { store.ui.draft = kept; location.hash = '#/new'; }
       else if (res.created != null) { store.ui.flash = typeof res.created === 'object' ? res.created.n : res.created; store.emit(); }

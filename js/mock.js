@@ -77,6 +77,16 @@ function seed() {
       workerNew: true, workerReport: true, quiet: false, telegram: true,
     },
     nextTask: 8,
+    checklists: { 'фре1360': ['Проверить вылет фрезы', 'Зажим детали', 'СОЖ включена'], 'все': ['Очки надеты'] },
+    docs: {
+      'ФДЗ': [{ kind: 'КД', title: 'Чертёж ФДЗ-01', url: 'https://example.com/fdz.pdf' }, { kind: 'Карта наладки', title: 'Наладка фре1360', url: 'https://example.com/nal.pdf' }],
+    },
+    passports: {
+      'ФДЗ': { 'Технология': 'Черновая Ø12, чистовая Ø8', 'Режимы резания': 'S 1200, F 300, ap 2', 'Инструмент': 'Фреза Ø12 Z4, фреза Ø8 Z3' },
+      'ФД 3': { 'Наименование': 'Фрезерный диск запасной', 'Выполнен': '2026-08-14', 'Технология': 'Так же, как ФДЗ' },
+    },
+    photos: {},
+    nextPhoto: 1,
   };
 }
 
@@ -94,6 +104,7 @@ function save(db) {
 }
 
 let db = load();
+const savePhoto = (data) => { db.photos = db.photos || {}; const id = (db.nextPhoto = (db.nextPhoto || 1) + 1) + '-demo01'; db.photos[id] = data; return id; };
 
 const shiftOrderAfter = (op, min) => {
   /* Упрощённый каскад: всё, что у этого станка и этого заказа идёт после
@@ -119,7 +130,7 @@ const view = (me) => {
       me, now: new Date().toISOString(),
       ops: db.ops.filter((o) => w.res.includes(o.res)),
       tasks: db.tasks.filter((t) => t.to === w.id && t.state !== 'убрана'),
-      orders: db.orders,
+      orders: db.orders, checklists: db.checklists || {},
     };
   }
   return {
@@ -127,7 +138,7 @@ const view = (me) => {
     people: db.people, resources: db.resources, orders: db.orders, ops: db.ops,
     pending: db.pending, decided: db.decided,
     tasks: db.tasks.filter((t) => t.state !== 'убрана'),
-    settings: db.settings,
+    settings: db.settings, checklists: db.checklists || {},
   };
 };
 
@@ -170,7 +181,7 @@ export const demo = {
         const now = new Date().toISOString();
         db.tasks.push({
           n, text: String(t.text).trim(), weight: t.weight || 'обычная', due: t.due || '',
-          state: 'открыта', to: t.to || '', order: t.order || '', comments: [],
+          state: 'открыта', to: t.to || '', order: t.order || '', comments: t.photo ? [{ ts: now, who: 'Вы', text: 'фото', photos: [savePhoto(t.photo)] }] : [],
           delivery: t.to ? { sent: now, delivered: now } : undefined,
         });
         out = Object.assign(view(me), { created: n }); break;
@@ -184,8 +195,10 @@ export const demo = {
       }
       case 'taskComment': {
         const t = task(p.n); if (!t) throw new Error('Задача не найдена');
-        const text = String(p.text || '').trim(); if (!text) throw new Error('Пустой комментарий');
-        t.comments.push({ ts: new Date().toISOString(), who: by, text });
+        const text = String(p.text || '').trim();
+        const text2 = text || (p.photo ? 'фото' : '');
+        if (!text2) throw new Error('Пустой комментарий');
+        t.comments.push({ ts: new Date().toISOString(), who: by, text: text2, photos: p.photo ? [savePhoto(p.photo)] : [] });
         out = view(me); break;
       }
       case 'taskRead': {
@@ -196,17 +209,28 @@ export const demo = {
       case 'mark': {
         const o = op(p.op); if (!o) throw new Error('Операция не найдена');
         const now = new Date().toISOString();
+        const ph = p.photo ? [savePhoto(p.photo)] : [];
         if (p.what === 'start') { o.status = 'в работе'; o.factStart = now; }
         if (p.what === 'finish') {
           o.status = 'ждёт решения'; o.factEnd = now; o.pct = 100;
-          db.pending.unshift({ id: 'r' + Date.now(), kind: 'done', who: me.name, at: now, opCode: o.code, text: p.text || 'Закончил', impact: 'Если принять: операция закрыта, следующие идут по плану.' });
+          const t = [p.qty ? 'сделано ' + p.qty + ' шт' : '', p.scrap ? 'брак ' + p.scrap + ' шт' : ''].filter(Boolean).join(', ');
+          db.pending.unshift({ id: 'r' + Date.now(), kind: 'done', who: me.name, at: now, opCode: o.code, text: t, impact: 'Если принять: операция закрыта, следующие идут по плану.' });
         }
         if (p.what === 'problem') {
           o.status = 'проблема'; o.problem = p.text || 'Есть проблема'; o.problemAt = now;
-          db.pending.unshift({ id: 'r' + Date.now(), kind: 'problem', who: me.name, at: now, opCode: o.code, text: o.problem, shiftMin: 60, impact: 'Сдвиг +1:00 по этой операции и тому, что за ней.' });
+          db.pending.unshift({ id: 'r' + Date.now(), kind: 'problem', who: me.name, at: now, opCode: o.code, text: o.problem, shiftMin: 60, impact: 'Сдвиг +1:00 по этой операции и тому, что за ней.', photos: ph });
         }
         if (p.what === 'comment') {
-          db.pending.unshift({ id: 'r' + Date.now(), kind: 'comment', who: me.name, at: now, opCode: o.code, text: p.text || '', impact: '' });
+          db.pending.unshift({ id: 'r' + Date.now(), kind: 'comment', who: me.name, at: now, opCode: o.code, text: p.text || '', impact: '', photos: ph });
+        }
+        if (p.what === 'pause') {
+          if (!p.text) throw new Error('Выберите причину паузы');
+          o.status = 'пауза'; o.pause = p.text; o.pauseAt = now;
+          db.pending.unshift({ id: 'r' + Date.now(), kind: 'pause', who: me.name, at: now, opCode: o.code, text: p.text, impact: 'Операция встанет в плане «приостановлено».' });
+        }
+        if (p.what === 'resume') {
+          o.status = 'в работе'; o.pause = ''; o.pauseAt = '';
+          db.pending.unshift({ id: 'r' + Date.now(), kind: 'resume', who: me.name, at: now, opCode: o.code, text: '', impact: 'Операция снова «в работе».' });
         }
         out = view(me); break;
       }
@@ -216,6 +240,39 @@ export const demo = {
       case 'pushSubscribe': out = { ok: true }; break;
       case 'reset': db = seed(); out = view(me); break;
       case 'flush': case 'ack': out = { ok: true }; break;
+      case 'photo': if (!db.photos[p.id]) throw new Error('Нет такого фото'); out = { id: p.id, data: db.photos[p.id] }; break;
+      case 'orderInfo': {
+        const o = db.orders.find((x) => x.code === p.order);
+        const name = (o && o.name) || ((db.passports || {})[p.order] || {})['Наименование'] || '';
+        const earlier = Object.keys(db.passports || {}).filter((k) => k !== p.order && db.passports[k]['Наименование'] === name)
+          .map((k) => ({ order: k, name, finished: db.passports[k]['Выполнен'] || '', docs: 0 }));
+        out = { order: p.order, name, docs: (db.docs || {})[p.order] || [], passport: (db.passports || {})[p.order] || null, earlier };
+        break;
+      }
+      case 'checklistSave': {
+        db.checklists = db.checklists || {};
+        const items = (p.items || []).map((x) => String(x).trim()).filter(Boolean);
+        if (items.length) db.checklists[p.res] = items; else delete db.checklists[p.res];
+        out = view(me); break;
+      }
+      case 'movePreview': case 'moveApply': {
+        const o = op(p.op); if (!o) throw new Error('Этап не найден');
+        const want = new Date(p.start), dur = new Date(o.end) - new Date(o.start);
+        const shift = want - new Date(o.start);
+        const changed = [{ code: o.code, order: o.order, op: o.op, res: o.res, from: o.start, to: want.toISOString(), end: new Date(want.getTime() + dur).toISOString(), me: true }];
+        db.ops.filter((x) => x !== o && x.order === o.order && new Date(x.start) >= new Date(o.end) && shift > 0).forEach((x) => {
+          changed.push({ code: x.code, order: x.order, op: x.op, res: x.res, from: x.start, to: new Date(new Date(x.start).getTime() + shift).toISOString() });
+        });
+        const last = changed.reduce((m, x) => Math.max(m, new Date(x.end || x.to).getTime()), 0);
+        const ord = db.orders.find((x) => x.code === o.order) || {};
+        const res = { op: o.code, asked: p.start, start: want.toISOString(), end: new Date(want.getTime() + dur).toISOString(), changed,
+          orders: [{ code: o.order, was: '', now: new Date(last).toISOString(), due: ord.due || '', late: !!(ord.due && last > new Date(ord.due)) }], applied: action === 'moveApply' };
+        if (action === 'moveApply') {
+          changed.forEach((c) => { const x = op(c.code); const d0 = new Date(x.end) - new Date(x.start); x.start = c.to; x.end = new Date(new Date(c.to).getTime() + d0).toISOString(); });
+          out = Object.assign(view(me), { moved: res });
+        } else out = res;
+        break;
+      }
       case 'sessions': out = { sessions: db.sessions || (db.sessions = [
         { row: 2, name: 'Павел', role: 'owner', device: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari', since: new Date(Date.now() - 12 * 864e5).toISOString(), seen: new Date().toISOString(), active: true, me: me.role === 'owner' },
         { row: 3, name: 'Оператор фре1360', role: 'worker', device: 'Mozilla/5.0 (Linux; Android 14) Chrome/128', since: new Date(Date.now() - 5 * 864e5).toISOString(), seen: new Date(Date.now() - 3 * 36e5).toISOString(), active: true, me: me.role === 'worker' },

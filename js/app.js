@@ -16,11 +16,15 @@ import * as notify from './views/notify.js';
 import * as shift from './views/shift.js';
 import * as login from './views/login.js';
 import * as sessions from './views/sessions.js';
+import * as order from './views/order.js';
+import * as search from './views/search.js';
+import * as checklists from './views/checklists.js';
+import { viewer } from './photo.js';
 
 const root = document.getElementById('app');
 
-const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, install: { render: login.renderInstall, on: login.on } };
-const WORKER = { shift, task, notify, sessions, install: { render: login.renderInstall, on: login.on } };
+const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, order, search, checklists, install: { render: login.renderInstall, on: login.on } };
+const WORKER = { shift, task, notify, sessions, order, install: { render: login.renderInstall, on: login.on } };
 
 function route() {
   const h = (location.hash || '#/').slice(2).split('?')[0];
@@ -54,7 +58,8 @@ function render() {
   const waiting = session.get() ? store.outboxSize : 0;
   const outbox = waiting ? ob.chip(waiting, store.sending) + (store.ui.outboxOpen ? ob.sheet(ob.outbox.list(), store.sending, (ob.outbox.list()[0] || {}).err) : '') : '';
   root.classList.toggle('has-ob', !!waiting);
-  root.innerHTML = r.view.render(r.params) + outbox + toast + demo;
+  const photo = store.ui.photoOpen ? viewer(store.ui.photoOpen) : '';
+  root.innerHTML = r.view.render(r.params) + outbox + photo + toast + demo;
   if (key !== lastRoute) window.scrollTo(0, 0);
   lastRoute = key;
 
@@ -84,6 +89,8 @@ const GLOBAL = {
   'ob-open': () => { store.ui.outboxOpen = true; store.emit(); },
   'ob-close': () => { store.ui.outboxOpen = false; store.emit(); },
   'ob-send': () => store.sendOutbox(),
+  'ph-open': (el) => { store.ui.photoOpen = el.dataset.id; store.emit(); },
+  'ph-close': () => { store.ui.photoOpen = null; store.emit(); },
   'ob-drop': (el) => {
     ob.outbox.remove(el.dataset.cid);
     if (!ob.outbox.size) { store.ui.outboxOpen = false; store.refresh(true); }
@@ -153,6 +160,8 @@ store.sub(render);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && session.get()) store.refresh(true); });
 setInterval(() => { if (!document.hidden && session.get()) store.refresh(true); }, 60000);
 /* Сеть вернулась — сразу отправить то, что ждёт. */
+/* Таймер на карточке операции («в работе 1 ч 25 мин») — раз в полминуты. */
+setInterval(() => { if (!document.hidden && session.get() && /^#\/(shift|today)?$|^$/.test(location.hash) && !document.activeElement?.matches('textarea,input')) render(); }, 30000);
 window.addEventListener('online', () => { if (session.get()) store.refresh(true); });
 
 /* Нажатие на уведомление, когда приложение уже открыто. */

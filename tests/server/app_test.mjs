@@ -44,6 +44,7 @@ ctx.UrlFetchApp.fetch = (url, params) => {
   return origFetch(url, params);
 };
 
+ctx.console = { log: () => {}, warn: () => {}, error: console.error, info: () => {} };
 loadServer(ctx, DIR, ["Код.gs", "Пуск.gs", "WebPush.gs", "App.gs"]);
 const run = (code) => vm.runInContext(code, ctx);
 const j = (code) => JSON.parse(run(`JSON.stringify(${code})`));
@@ -519,6 +520,114 @@ check("часы держат план в кэше тёплым: свежий н�
   run("engineNow_ = __старыйДвижок;");
 });
 check("ответ приложения сообщает время сервера", () => { truthy(post({ a: "load", s: OWN }).ms >= 0, "нет ms"); });
+
+console.log("\n8. Волна 2: у станка и в плане");
+const PNG = "data:image/png;base64," + Buffer.from("фото-проверка-".repeat(8000)).toString("base64");
+let WOP2;
+check("пауза с причиной → «пауза», продолжил → снова «в работе»", () => {
+  const w = post({ a: "load", s: WRK });
+  WOP2 = (w.ops.find((o) => o.status === "план" && o.code !== WOP) || w.ops[0]).code;
+  post({ a: "mark", s: WRK, op: WOP2, what: "start" });
+  let v = post({ a: "mark", s: WRK, op: WOP2, what: "pause", text: "нет заготовки" });
+  let o = v.ops.find((x) => x.code === WOP2);
+  eq(o.status, "пауза", "статус"); eq(o.pause, "нет заготовки", "причина"); truthy(o.pauseAt, "нет времени паузы");
+  truthy(/нужна причина|Выберите причину/.test(post({ a: "mark", s: WRK, op: WOP2, what: "pause" }).error), "пауза без причины прошла");
+  v = post({ a: "mark", s: WRK, op: WOP2, what: "resume" });
+  eq(v.ops.find((x) => x.code === WOP2).status, "в работе", "после «Продолжил»");
+  const kinds = post({ a: "load", s: OWN }).pending.filter((r) => r.opCode === WOP2).map((r) => r.kind).join(",");
+  truthy(/pause/.test(kinds) && /resume/.test(kinds), "у владельца: " + kinds);
+});
+check("владелец принял паузу → в плане «приостановлено», принял «продолжил» → «в работе»", () => {
+  const pend = post({ a: "load", s: OWN }).pending.filter((r) => r.opCode === WOP2);
+  const st = pend.find((r) => r.kind === "start");
+  if (st) post({ a: "decide", s: OWN, id: st.id, yes: true });
+  post({ a: "decide", s: OWN, id: pend.find((r) => r.kind === "pause").id, yes: true });
+  eq(run(`readPlan_().operations.filter(function(o){return o.id===${JSON.stringify(WOP2)}})[0].status`), "приостановлено", "после паузы");
+  post({ a: "decide", s: OWN, id: pend.find((r) => r.kind === "resume").id, yes: true });
+  eq(run(`readPlan_().operations.filter(function(o){return o.id===${JSON.stringify(WOP2)}})[0].status`), "в работе", "после «продолжил»");
+});
+check("«Закончил» со сколько сделано и браком", () => {
+  post({ a: "mark", s: WRK, op: WOP2, what: "finish", qty: 48, scrap: 2 });
+  const r = post({ a: "load", s: OWN }).pending.find((x) => x.opCode === WOP2 && x.kind === "done");
+  truthy(r, "нет «Закончил» у владельца");
+  eq(r.text, "сделано 48 шт, брак 2 шт", "текст");
+  post({ a: "decide", s: OWN, id: r.id, yes: true });
+  const op = j(`readPlan_().operations.filter(function(o){return o.id===${JSON.stringify(WOP2)}})[0]`);
+  eq(op.status, "завершено", "статус"); truthy(/сделано 48 шт/.test(op.note) && /брак 2 шт/.test(op.note), "примечание: " + op.note);
+});
+let PH;
+check("фото к проблеме: хранится в отдельной таблице, видно владельцу, отдаётся по входу", () => {
+  const v = post({ a: "mark", s: WRK, op: WOP, what: "problem", text: "трещина", photo: PNG });
+  truthy(!v.error, v.error);
+  const r = post({ a: "load", s: OWN }).pending.find((x) => x.kind === "problem" && x.text === "трещина");
+  truthy(r && r.photos.length === 1, "нет фото в ответе");
+  PH = r.photos[0];
+  const got = post({ a: "photo", s: OWN, id: PH });
+  eq(got.data === PNG, true, "фото пришло не тем");
+  truthy(post({ a: "photo", s: OWN, id: PH.replace(/-\w+$/, "-zzzzzz") }).error, "чужой ключ подошёл");
+  truthy(post({ a: "photo", id: PH }).code === "auth", "без входа отдали");
+  truthy(j("props_().getProperty('APP_PHOTO_SS')") !== j("props_().getProperty('SHEET_ID')"), "фото в таблице плана");
+  const note = j("pendingFacts_().filter(function(f){return /трещина/.test(f.note)})[0].note");
+  truthy(/\[фото: \d+-\w{6}\]/.test(note), "в «Факте» нет метки фото: " + note);
+});
+check("фото к комментарию поручения и к новой задаче", () => {
+  const v = post({ a: "taskComment", s: WRK, n: N2(), text: "", photo: PNG });
+  truthy(!v.error, v.error);
+  const c = post({ a: "load", s: OWN }).tasks.find((t) => t.n === N2()).comments.pop();
+  eq(c.photos.length, 1, "фото в комментарии"); eq(c.text, "фото", "текст");
+  const t = post({ a: "taskSave", s: OWN, task: { text: "Посмотри фото", to: "Слесарь", photo: PNG } });
+  eq(t.tasks.find((x) => x.n === t.created).comments[0].photos.length, 1, "фото в новой задаче");
+});
+function N2() { return post({ a: "load", s: WRK }).tasks[0].n; }
+check("чертёж и паспорт заказа у станка + прошлые заказы той же детали; чужой заказ — нет", () => {
+  const w = post({ a: "load", s: WRK });
+  const ord = w.ops[0].order;
+  const name = (w.orders.find((o) => o.code === ord) || {}).name || "";
+  run(`appendRow_(SH.DOCS, COL_DOCS, {'Заказ':${JSON.stringify(ord)},'Вид':'КД','Название':'Чертёж','Ссылка':'https://drive.google.com/x','Добавлен':'','Кто':''})`);
+  run(`записатьВПаспорт_(${JSON.stringify(ord)}, {'Режимы резания':'S 1200, F 300', 'Наименование': ${JSON.stringify(name)}})`);
+  run(`записатьВПаспорт_('СТАРЫЙ-1', {'Наименование': ${JSON.stringify(name)}, 'Выполнен': '2026-08-01', 'Инструмент': 'фреза Ø12'})`);
+  const r = post({ a: "orderInfo", s: WRK, order: ord });
+  truthy(!r.error, r.error);
+  eq(r.docs[0].url, "https://drive.google.com/x", "документ");
+  eq(r.passport["Режимы резания"], "S 1200, F 300", "режимы");
+  truthy(r.earlier.some((e) => e.order === "СТАРЫЙ-1"), "нет прошлого заказа");
+  eq(post({ a: "orderInfo", s: WRK, order: "СТАРЫЙ-1" }).passport["Инструмент"], "фреза Ø12", "прошлый заказ рабочему");
+  const чужой = post({ a: "load", s: OWN }).ops.find((o) => o.res !== M && !w.ops.some((x) => x.order === o.order));
+  if (чужой) truthy(/не на вашем участке/.test(post({ a: "orderInfo", s: WRK, order: чужой.order }).error), "чужой заказ открылся");
+});
+check("чек-лист станка: владелец правит, рабочий видит, «Начал» пишет, сколько отмечено", () => {
+  const v = post({ a: "checklistSave", s: OWN, res: M, items: ["Проверить вылет фрезы", "Зажим детали", "  "] });
+  truthy(!v.error, v.error);
+  eq(v.checklists[M].length, 2, "пунктов у владельца");
+  post({ a: "checklistSave", s: OWN, res: "ВСЕ", items: ["Очки надеты"] });
+  const w = post({ a: "load", s: WRK });
+  eq(w.checklists[M].length, 2, "пунктов у рабочего"); eq(w.checklists["все"][0], "Очки надеты", "общий пункт");
+  truthy(post({ a: "checklistSave", s: WRK, res: M, items: [] }).error, "рабочий правит чек-лист");
+  const op = w.ops.find((o) => o.status === "план" && o.code !== WOP && o.code !== WOP2);
+  if (op) {
+    post({ a: "mark", s: WRK, op: op.code, what: "start", check: "3/3" });
+    truthy(post({ a: "load", s: OWN }).pending.some((r) => r.opCode === op.code && /чек-лист 3\/3/.test(r.text)), "нет чек-листа в отметке");
+  }
+});
+check("сдвиг этапа: предпросмотр ничего не пишет, «Сдвинуть» пишет и сдвигает следующие", () => {
+  const v0 = post({ a: "load", s: OWN });
+  const op = v0.ops.filter((o) => o.status === "план").sort((a, b) => new Date(a.start) - new Date(b.start))[0];
+  const d = new Date(new Date(op.start).getTime() + 2 * 864e5); d.setHours(10, 0, 0, 0);
+  const iso = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + "T10:00";
+  const ver = run("planVersion_()");
+  const p = post({ a: "movePreview", s: OWN, op: op.code, start: iso });
+  truthy(!p.error, p.error);
+  truthy(p.changed.some((x) => x.me), "сам этап не в списке сдвинутых");
+  truthy(new Date(p.start) >= d, "встал раньше, чем просили: " + p.start);
+  eq(run("planVersion_()"), ver, "предпросмотр записал план");
+  truthy(post({ a: "movePreview", s: WRK, op: op.code, start: iso }).error, "рабочий двигает план");
+  const a = post({ a: "moveApply", s: OWN, op: op.code, start: iso, cid: "mv-1" });
+  truthy(!a.error, a.error);
+  eq(run("planVersion_()"), ver + 1, "версия");
+  eq(a.ops.find((x) => x.code === op.code).start, p.start, "в ответе этап не там");
+  eq(j(`readPlan_().operations.filter(function(o){return o.id===${JSON.stringify(op.code)}})[0].constraintType`), "SNET", "ограничение");
+  return `сдвинулось этапов: ${p.changed.length}, заказов затронуто: ${p.orders.length}`;
+});
 
 console.log(`\nИтого: ${ok} прошло, ${bad} упало`);
 process.exit(bad ? 1 : 0);

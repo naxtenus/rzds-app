@@ -39,6 +39,7 @@ Object.assign(ctx.Utilities, {
 const baseFmt = ctx.Utilities.formatDate;
 ctx.Utilities.formatDate = (d, tz, p) => (p === "H" ? String(d.getHours()) : baseFmt(d, tz, p));
 ctx.ContentService = { MimeType: { JSON: "json" }, createTextOutput: (t) => ({ t, setMimeType() { return this; } }) };
+ctx.console = { log: () => {}, warn: () => {}, error: console.error, info: () => {} };
 loadServer(ctx, DIR, ["Код.gs", "Пуск.gs", "WebPush.gs", "App.gs"]);
 const run = (code) => vm.runInContext(code, ctx);
 run("Настроить_()");
@@ -129,9 +130,21 @@ await expect((await wt()).toLowerCase().includes("моя смена") && (await 
 await wp.screenshot({ path: `${OUT}/e4-worker.png` });
 const hasStart = await wp.$('[data-act="mark"][data-w="start"]');
 if (hasStart) { await hasStart.click(); await sleep(1500); }
-const fin = await wp.$('[data-act="mark"][data-w="finish"]');
+/* фото к комментарию — настоящая камера заменена файлом */
+fs.writeFileSync("/tmp/e2e-photo.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANGgEBi1OTgAAAAABJRU5ErkJggg==", "base64"));
+await wp.click('[data-act="form"][data-f="comment"]'); await sleep(300);
+const [chooser] = await Promise.all([wp.waitForFileChooser({ timeout: 5000 }), wp.click('[data-act="photo"]')]);
+await chooser.accept(["/tmp/e2e-photo.png"]); await sleep(800);
+await expect(!!(await wp.$(".ph img")), "фото прикрепилось к комментарию (ужато на телефоне)");
+await wp.type("#shift-text", "вот так стоит деталь");
+await wp.click('[data-act="send-form"]'); await sleep(1500);
+await wp.click('[data-act="form"][data-f="pause"]'); await sleep(300);
+await wp.click('[data-act="pause-why"]'); await wp.click('[data-act="send-pause"]'); await sleep(1500);
+await expect((await wt()).includes("На паузе"), "пауза у рабочего");
+await wp.click('[data-act="mark"][data-w="resume"]'); await sleep(1500);
+const fin = await wp.$('[data-act="form"][data-f="finish"]');
 await expect(!!fin, "после «Начал» есть «Закончил»");
-if (fin) { await fin.click(); await sleep(1500); }
+if (fin) { await fin.click(); await sleep(300); await wp.type("#fin-qty", "7"); await wp.click('[data-act="send-finish"]'); await sleep(1500); }
 await wp.screenshot({ path: `${OUT}/e5-worker-after.png` });
 
 /* владелец видит ответы и решает */
@@ -140,6 +153,9 @@ await page.evaluate(() => location.reload());
 await sleep(2000);
 await go("#/replies");
 await expect((await page.$$('[data-act="decide"]')).length >= 2, "у владельца ответы со смены");
+await sleep(1500);
+await expect(!!(await page.$(".ph img")), "владелец видит фото со смены");
+await expect((await txt()).includes("сделано 7 шт") && (await txt()).includes("Нет заготовки"), "у владельца «сделано 7 шт» и причина паузы");
 await shot("e6-replies");
 await page.click('[data-act="decide"][data-yes="1"]');
 await sleep(2000);
@@ -163,6 +179,21 @@ await sleep(2500);
 const tasksNow = JSON.parse(run("JSON.stringify(задачи_(false).filter(function(t){return t.text==='Задача без связи'}).length)"));
 await expect(tasksNow === 1 && !(await txt()).includes("Ждёт отправки"), "сеть вернулась — ушла сама, ровно одна задача на сервере (" + tasksNow + ")");
 await expect((acts.flush || 0) > 0, "телефон просит разослать уведомления отдельным запросом (flush: " + (acts.flush || 0) + ")");
+
+/* план: перенос этапа с предпросмотром */
+await go("#/plan");
+const blk = await page.$('.blk[data-drag]');
+if (blk) {
+  await blk.click(); await sleep(400);
+  await page.click('[data-act="mv-open"]'); await sleep(400);
+  const dd = await page.$$('#mvcal [data-act="cal-day"]:not([disabled])'); await dd[3].click(); await sleep(200);
+  await page.click('[data-act="mv-preview"]'); await sleep(2500);
+  await expect((await txt()).includes("Встанет:"), "предпросмотр переноса с сервера");
+  await shot("e11-move-preview");
+  const v0 = Number(run("planVersion_()"));
+  await page.click('[data-act="mv-apply"]'); await sleep(2500);
+  await expect(Number(run("planVersion_()")) === v0 + 1, "перенос записан в план");
+} else await expect(false, "в плане нет этапа, который можно двигать");
 
 /* «Мои входы» */
 await go("#/sessions");

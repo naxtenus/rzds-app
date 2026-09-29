@@ -63,7 +63,8 @@ export function render() {
         <h1 class="title" style="margin:0">Задачи</h1>
         <div class="sub">Мне ${mine.length} · поручил ${given.length}</div>
       </div>
-      <a class="btn primary" href="#/new" style="height:48px;border-radius:16px">${icon.plus(20)} Задача</a>
+      <div style="display:flex;gap:8px;align-items:center"><a class="icon-btn" href="#/search" aria-label="Поиск">${icon.search(22)}</a>
+      <a class="btn primary" href="#/new" style="height:48px;border-radius:16px">${icon.plus(20)} Задача</a></div>
     </header>
     <div class="segment" role="tablist" aria-label="Фильтр" style="grid-template-columns:repeat(3,minmax(0,1fr))">${seg}</div>
     ${groups.map((g) => `<section style="display:flex;flex-direction:column;gap:8px">

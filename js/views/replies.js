@@ -5,6 +5,7 @@
 import { esc, icon, hhmm, ago } from '../util.js';
 import { tabbar } from '../ui.js';
 import { store } from '../store.js';
+import { thumbs } from '../photo.js';
 import { kindPill, decisionButtons, on as todayOn } from './today.js';
 
 export function render() {
@@ -21,6 +22,7 @@ export function render() {
       <div class="row-between" style="align-items:center"><span class="small muted strong">${esc(r.who)} · ${hhmm(r.at)}</span>${kindPill(r)}</div>
       <div><div class="strong" style="font-size:18px">${esc(o.order || r.opCode)}</div><div class="small muted">${esc(o.op || '')}${o.res ? ' · ' + esc(o.res) : ''}</div></div>
       ${r.text ? `<div style="padding:10px 12px;border-radius:14px;background:#F6F3EC;font-size:15px">«${esc(r.text)}»</div>` : ''}
+      ${thumbs(r.photos)}
       ${open ? `${r.impact ? `<div class="small" style="display:flex;gap:8px;color:var(--bronze-dd)">${icon.plan(16)}<span>${esc(r.impact)}</span></div>` : ''}
         <div class="btns">
           <button class="btn primary" data-act="decide" data-id="${esc(r.id)}" data-yes="1">${yes}</button>

@@ -73,6 +73,7 @@ class FakeSheet {
     else this.cells.set(this._k(r, c), v);
   }
   getName() { return this.name; }
+  setName(n) { this.name = n; return this; }
   getLastRow() {
     let m = 0;
     for (const k of this.cells.keys()) m = Math.max(m, +k.split(":")[0]);

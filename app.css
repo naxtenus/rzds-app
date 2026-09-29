@@ -331,3 +331,48 @@ button.kv { font: inherit; color: inherit; cursor: pointer; }
 .sess.off { opacity: .55; }
 .sess .me { color: var(--green); font-weight: 700; }
 .has-ob .toast { top: calc(var(--top) + 52px); }
+
+/* ------------------------------------------------------------ волна 2 */
+/* Фото */
+.ph-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.ph { position: relative; width: 76px; height: 76px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: var(--bg2);
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--muted); }
+.ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 13px; border: none; background: rgba(27,31,28,.7); color: #fff; display: flex; align-items: center; justify-content: center; padding: 0; }
+.ph-full { position: fixed; inset: 0; z-index: 70; background: rgba(10,12,10,.94); display: flex; align-items: center; justify-content: center; padding: calc(var(--top) + 12px) 12px calc(var(--bottom) + 12px); }
+.ph-full img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+.ph-close { position: absolute; top: calc(var(--top) + 12px); right: 12px; width: 44px; height: 44px; border-radius: 22px; border: none; background: rgba(255,255,255,.18); color: #fff; display: flex; align-items: center; justify-content: center; }
+.input-row .icon-btn:first-child { margin-left: -10px; }
+/* Смена: таймер, пауза, количество, чек-лист */
+.timer { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; background: var(--green-l); color: var(--green-d); font-size: 15px; }
+.timer.paused { background: var(--bronze-l); color: var(--bronze-dd); }
+.timer.bad { background: var(--red-l); color: var(--red-d); }
+.shift-card .grid2 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
+.field-in { border: none; outline: none; background: #fff; border-radius: 12px; padding: 12px; font-size: 16px; color: var(--ink); }
+.stepper { display: grid; grid-template-columns: 56px 1fr 56px; gap: 8px; }
+.stepper .icon-btn { width: 56px; height: 56px; border-radius: 16px; font-size: 26px; font-weight: 600; background: #fff; }
+.stepper input { height: 56px; border: none; border-radius: 16px; background: #fff; text-align: center; font-size: 26px; font-weight: 700; color: var(--ink); min-width: 0; }
+.check-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; border: none; background: none; text-align: left; font: inherit; font-size: 16px; color: var(--ink); }
+.check-row .check { pointer-events: none; }
+.check-row.on { background: var(--green-l); }
+.ob-sheet .btn.big[disabled] { opacity: .5; }
+/* Заказ у станка */
+.pass-row { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.pass-v { font-size: 16px; white-space: pre-wrap; line-height: 1.4; }
+/* Поиск */
+.search-box { display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 16px; border-radius: 16px; background: var(--card); border: 1px solid #E0DACD; color: var(--muted); }
+.search-box input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 17px; color: var(--ink); }
+/* План: неделя, перетаскивание, перенос */
+.gantt .hours.week .wd { position: absolute; top: 5px; font-size: 12px; font-weight: 700; color: var(--muted); text-align: center; transform: none; }
+.gantt .hours.week .wd.today { color: var(--green-d); }
+.gantt .hours.week .wd.wk { color: #A8ABA6; }
+.gantt .grid.day { background: var(--line); }
+.gantt .wkbg { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.025); }
+.gantt.is-week .blk { padding: 0 5px; border-radius: 8px; }
+.gantt.is-week .blk b { font-size: 11px; }
+.gantt .blk { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: pan-x; }
+.gantt .blk.dragging { z-index: 5; box-shadow: 0 8px 20px rgba(27,31,28,.3); outline: 2px solid var(--ink); overflow: visible; }
+.gantt .blk.dragging::after { content: attr(data-to); position: absolute; top: -22px; left: 0; padding: 1px 6px; border-radius: 6px; background: var(--ink); color: #fff; font-size: 11px; font-weight: 700; }
+.sheet.mv { max-height: 72vh; overflow: auto; }
+.sheet .late { color: var(--red-d); font-weight: 700; }
+.mv-list .kv { gap: 8px; }

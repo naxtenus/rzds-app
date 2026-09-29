@@ -4,6 +4,7 @@
 import { esc, icon, dayTitle, hhmm, ago, sameDay } from '../util.js';
 import { tabbar, opL } from '../ui.js';
 import { store } from '../store.js';
+import { thumbs } from '../photo.js';
 
 const opByCode = (d, c) => (d.ops || []).find((o) => o.code === c);
 
@@ -15,6 +16,8 @@ export const kindPill = (r) => ({
   start: '<span class="pill green">Начал</span>',
   move: '<span class="pill bronze">Просит перенос</span>',
   scrap: '<span class="pill red">Брак</span>',
+  pause: '<span class="pill bronze">Пауза</span>',
+  resume: '<span class="pill green">Продолжил</span>',
 }[r.kind] || '');
 
 export const decisionButtons = (r) => {
@@ -23,6 +26,8 @@ export const decisionButtons = (r) => {
   if (r.kind === 'done' || r.kind === 'start') return ['Принять', 'Не принимать'];
   if (r.kind === 'move') return ['Перенести', 'Не переносить'];
   if (r.kind === 'scrap') return ['Записать', 'Не записывать'];
+  if (r.kind === 'pause') return ['Отметить паузу', 'Не отмечать'];
+  if (r.kind === 'resume') return ['Принять', 'Не принимать'];
   return ['Прочитано', ''];
 };
 
@@ -54,7 +59,7 @@ export function render() {
           <div class="row-between" style="align-items:center">
             <span class="small muted strong">${esc(o.res || '')} · ${esc(o.order || r.opCode)} · ${hhmm(r.at)}</span>${kindPill(r)}
           </div>
-          <div class="strong" style="font-size:15px">${esc(r.text)}</div>
+          <div class="strong" style="font-size:15px">${esc(r.text)}</div>${thumbs(r.photos)}
           <div class="btns">
             <button class="btn primary" data-act="decide" data-id="${esc(r.id)}" data-yes="1">${yes}</button>
             ${no ? `<button class="btn" data-act="decide" data-id="${esc(r.id)}" data-yes="0">${no}</button>` : ''}
@@ -94,7 +99,8 @@ export function render() {
         <h1 class="title">Сегодня</h1>
         <div class="sub">${dayTitle(now)}</div>
       </div>
-      <a class="icon-btn" href="#/notify" aria-label="Уведомления${bells ? ', ' + bells + ' новых' : ''}">${icon.bell()}${bells ? `<span class="badge">${bells}</span>` : ''}</a>
+      <div style="display:flex;gap:8px"><a class="icon-btn" href="#/search" aria-label="Поиск">${icon.search(22)}</a>
+      <a class="icon-btn" href="#/notify" aria-label="Уведомления${bells ? ', ' + bells + ' новых' : ''}">${icon.bell()}${bells ? `<span class="badge">${bells}</span>` : ''}</a></div>
     </header>
     ${statusLine()}
     ${decide}

@@ -5,6 +5,7 @@ import { esc, icon, hhmm, dueText, ago, isOverdue } from '../util.js';
 import { weightLook, WEIGHTS, personName, deliveryState, avatar } from '../ui.js';
 import { store } from '../store.js';
 import { calendar, calInit, calOn, calValue, calSummary } from './calendar.js';
+import { pickPhoto, thumbs, draftThumb } from '../photo.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const at = (off, h) => { const d = new Date(); d.setDate(d.getDate() + off); d.setHours(h, 0, 0, 0); return d; };
@@ -34,7 +35,8 @@ export function render(params) {
 
   const comments = (t.comments || []).map((c) => {
     const mine = worker ? c.who === store.me.name : !((d.people || []).some((p) => p.name === c.who));
-    return `<div class="bubble${mine ? ' mine' : ''}"><div class="by">${esc(mine ? 'Вы' : c.who)} · ${hhmm(c.ts)}</div><div style="margin-top:2px">${esc(c.text)}</div></div>`;
+    const onlyPhoto = (c.photos || []).length && c.text === 'фото';
+    return `<div class="bubble${mine ? ' mine' : ''}"><div class="by">${esc(mine ? 'Вы' : c.who)} · ${hhmm(c.ts)}</div>${onlyPhoto ? '' : `<div style="margin-top:2px">${esc(c.text)}</div>`}${c.localPhoto ? draftThumb(c.localPhoto, 'noop') : thumbs(c.photos)}</div>`;
   }).join('');
 
   const ownerBody = `
@@ -79,7 +81,9 @@ export function render(params) {
     <section style="display:flex;flex-direction:column;gap:8px" aria-label="Переписка">
       <h2 class="section-title">${t.to ? 'Переписка' : 'Комментарии'}</h2>
       ${comments || `<div class="small muted" style="padding:0 4px">${t.to ? 'Пока ни слова. Напишите, если нужно уточнить.' : 'Записывайте сюда, что сделано и что дальше.'}</div>`}
+      ${draftThumb(store.ui.cmtPhoto)}
       <div class="input-row">
+        <button class="icon-btn" data-act="cmt-photo" aria-label="Приложить фото">${icon.camera(20)}</button>
         <label class="sr" for="cmt">Комментарий</label>
         <input id="cmt" type="text" data-bind="comment" placeholder="${t.to && !worker ? 'Написать: ' + esc(who) + '…' : 'Написать…'}" enterkeyhint="send" autocomplete="off">
         <button class="icon-btn green" data-act="comment" data-n="${n}" aria-label="Отправить">${icon.send(18)}</button>
@@ -148,14 +152,22 @@ export const on = {
     const n = Number(el.dataset.n);
     const input = document.querySelector('#cmt');
     const text = (input.value || '').trim();
-    if (!text) { input.focus(); return; }
+    const photo = store.ui.cmtPhoto || null;
+    if (!text && !photo) { input.focus(); return; }
     input.value = '';
+    store.ui.cmtPhoto = null;
     const who = store.me && store.me.role === 'worker' ? store.me.name : 'Вы';
-    await store.act('taskComment', { n, text }, (d) => {
-      const x = d.tasks.find((y) => y.n === n); if (x) x.comments.push({ ts: new Date().toISOString(), who, text });
-    });
+    const payload = { n, text };
+    if (photo) payload.photo = photo;
+    await store.act('taskComment', payload, (d) => {
+      const x = d.tasks.find((y) => y.n === n); if (x) x.comments.push({ ts: new Date().toISOString(), who, text: text || 'фото', localPhoto: photo });
+    }, photo ? 'Фото отправлено' : '');
   },
 };
+
+on['cmt-photo'] = async () => { const d = await pickPhoto(); if (d) { store.ui.cmtPhoto = d; store.emit(); } };
+on['ph-drop'] = () => { store.ui.cmtPhoto = null; store.emit(); };
+on['noop'] = () => {};
 
 export const onChange = {
   'move-pick': (el) => { if (!el.value) return; store.ui.moving = null; upd(Number(el.dataset.n), { due: new Date(el.value).toISOString() }, 'Перенёс'); },

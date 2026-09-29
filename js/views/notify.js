@@ -64,6 +64,10 @@ export function render() {
         <div class="t"><div class="strong" style="font-size:15px;font-weight:600">${l}</div><div class="small muted">${h}</div></div>
         <button class="switch" role="switch" aria-checked="${isOn(s, k)}" aria-label="${esc(l)}" data-act="toggle" data-k="${k}"><i></i></button>
       </div>`).join('')}</div></section>`).join('')}
+    ${worker ? '' : `<section style="display:flex;flex-direction:column;gap:8px">
+      <h2 class="section-title">Цех</h2>
+      <div class="list"><a class="kv" href="#/checklists" style="text-decoration:none;color:inherit">${icon.check(20)}<span class="v">Чек-листы перед «Начал»</span>
+        <span class="small muted">${Object.values(d.checklists || {}).reduce((n, x) => n + x.length, 0) || 'нет'}</span>${icon.next(18)}</a></div></section>`}
     ${worker ? '' : accessBlock(d)}
     <section style="display:flex;flex-direction:column;gap:8px">
       <h2 class="section-title">Приложение</h2>

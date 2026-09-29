@@ -20,7 +20,7 @@ const KEY = 'rzds-outbox';
 /* Что можно отложить. Вход, выдача кодов, подписка на уведомления —
    нельзя: их результат нужен сразу, на экране. */
 export const QUEUEABLE = new Set(['mark', 'taskSave', 'taskUpdate', 'taskComment', 'taskRead',
-  'decide', 'undecide', 'settingsSave']);
+  'decide', 'undecide', 'settingsSave', 'checklistSave']);
 
 export const outbox = {
   list() { try { return JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) { return []; } },
@@ -37,9 +37,9 @@ export const newCid = () => Date.now().toString(36) + '-' + Math.random().toStri
 /* Подпись для списка: что это было, словами. */
 export function describe(action, payload) {
   const p = payload || {};
-  const W = { start: 'Начал', finish: 'Закончил', problem: 'Проблема', comment: 'Комментарий' };
+  const W = { start: 'Начал', finish: 'Закончил', problem: 'Проблема', comment: 'Комментарий', pause: 'Пауза', resume: 'Продолжил' };
   switch (action) {
-    case 'mark': return (W[p.what] || 'Отметка') + ' · ' + (p.op || '') + (p.text ? ' — «' + p.text + '»' : '');
+    case 'mark': return (W[p.what] || 'Отметка') + ' · ' + (p.op || '') + (p.text ? ' — «' + p.text + '»' : '') + (p.photo ? ' · фото' : '');
     case 'taskSave': return (p.task && p.task.to ? 'Поручение: ' : 'Задача: ') + ((p.task && p.task.text) || '');
     case 'taskUpdate':
       if (p.state === 'закрыта') return 'Задача №' + p.n + ' — выполнена';
@@ -54,6 +54,7 @@ export function describe(action, payload) {
     case 'decide': return (p.yes ? 'Принять' : 'Отклонить') + ' ответ со смены';
     case 'undecide': return 'Вернуть ответ на решение';
     case 'settingsSave': return 'Настройки уведомлений';
+    case 'checklistSave': return 'Чек-лист: ' + (p.res === 'все' ? 'все станки' : p.res);
     default: return action;
   }
 }
