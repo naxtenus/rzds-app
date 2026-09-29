@@ -51,6 +51,12 @@ var ПРИЛ_ПРАВКИ = { decide: 1, undecide: 1, mark: 1, taskSave: 1, task
    Всё, что прочитано за запрос, живёт здесь и выбрасывается в конце.
    отложить — push и Телеграм не слать сейчас, а поставить в очередь. */
 var __прил = null;
+/* Засечки по шагам — видны в ответе (tm) и в журнале: где уходит время. */
+function Прил_засечь_(k, t0) {
+  if (!__прил) return;
+  var tm = __прил.tm || (__прил.tm = {});
+  tm[k] = (tm[k] || 0) + (Date.now() - t0);
+}
 function Прил_забыть_() { if (__прил) { __прил.св = null; __прил.листы = {}; __прил.план = null; } }
 
 /* Все свойства скрипта одним обращением. */
@@ -77,9 +83,10 @@ function Прил_doPost_(e) {
     if (__прил.очередь.length) { Прил_вОчередь_(__прил.очередь); out.flush = true; }
   } catch (err) { Logger.log('очередь уведомлений: %s', err); }
   out.ms = Date.now() - t0;
+  if (__прил.tm) out.tm = __прил.tm;
   /* Видно в «Количестве выполнений» → строка → журнал: какое действие
      сколько стоило (сами запросы там все называются doPost). */
-  try { console.log('приложение: ' + a + ' — ' + out.ms + ' мс' + (out.error ? ' — ' + out.error : '')); } catch (err) {}
+  try { console.log('приложение: ' + a + ' — ' + out.ms + ' мс' + (out.tm ? ' ' + JSON.stringify(out.tm) : '') + (out.error ? ' — ' + out.error : '')); } catch (err) {}
   __прил = null;
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -96,7 +103,9 @@ function Прил_действие_(a, p) {
      работник), у которого нет сессии. Номер уведомления случайный и
      одноразовый — знать его может только тот, кому оно пришло. */
   if (a === 'ack') return Прил_получено_(p.id);
+  var tк = Date.now();
   var me = Прил_кто_(p.s);
+  Прил_засечь_('вход', tк);
   var вл = me.role === 'owner';
 
   /* Повтор того же нажатия: связь оборвалась после записи, телефон
@@ -346,8 +355,13 @@ function Прил_лист_(ключ) {
   var м = __прил && __прил.листы;
   if (м && м[ключ]) return м[ключ];
   var имя = ПРИЛ_ЛИСТЫ[ключ]()[0], cols = ПРИЛ_ЛИСТЫ[ключ]()[1];
-  var sh = ss_().getSheetByName(имя);
+  var t0 = Date.now();
+  var книга = ss_();
+  Прил_засечь_('таблица', t0);
+  t0 = Date.now();
+  var sh = книга.getSheetByName(имя);
   var v = sh ? sh.getDataRange().getValues() : [];
+  Прил_засечь_('лист ' + ключ, t0);
   var шапка = v.length ? v[0].map(function (h) { return String(h || '').trim(); }) : cols.slice();
   var строки = v.length > 1 ? v.slice(1) : [];
   var т = {
@@ -468,10 +482,13 @@ function Прил_ключПлана_() {
 }
 function Прил_планЧасть_(заново) {
   if (__прил && __прил.план && !заново) return __прил.план;
+  var t0 = Date.now();
   var ключ = Прил_ключПлана_();
   var c = CacheService.getScriptCache();
   var готово = заново ? null : Прил_кэшВзять_(c, ключ);
+  Прил_засечь_('план из кэша', t0);
   if (готово) { if (__прил) __прил.план = готово; return готово; }
+  t0 = Date.now();
 
   var eng = engineNow_();
   var сегодня = new Date(); сегодня.setHours(0, 0, 0, 0);
@@ -503,6 +520,7 @@ function Прил_планЧасть_(заново) {
   var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие, at: Date.now() };
   Прил_кэшПоложить_(c, ключ, часть, ПРИЛ_КЭШ_СЕК);
   if (__прил) __прил.план = часть;
+  Прил_засечь_('расчёт плана', t0);
   return часть;
 }
 
@@ -571,7 +589,9 @@ function Прил_вид_(me) {
   });
   var задачи = Прил_задачиДляВида_();
 
+  var tч = Date.now();
   var чек = Прил_чекЛисты_();
+  Прил_засечь_('чек-листы', tч);
   if (me.role === 'worker') {
     var мойЧек = {};
     Object.keys(чек).forEach(function (k) { if (k === ПРИЛ_ВСЕ || !мои || !мои.length || мои.indexOf(k) >= 0) мойЧек[k] = чек[k]; });
