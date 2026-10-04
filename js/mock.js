@@ -142,7 +142,7 @@ const view = (me) => {
     people: db.people, resources: db.resources, orders: db.orders, ops: db.ops,
     pending: db.pending, decided: db.decided,
     tasks: db.tasks.filter((t) => t.state !== 'убрана'),
-    settings: db.settings, checklists: db.checklists || {},
+    settings: db.settings, checklists: db.checklists || {}, stops: db.stops || [],
   };
 };
 
@@ -249,6 +249,18 @@ export const demo = {
         out = { chat: db.chats[p.order] }; break;
       }
       case 'ping': out = { ok: true }; break;
+      case 'downtime': {
+        /* Простой станка (04.10): как на сервере — «стоит» заводит простой,
+           «пошёл» закрывает идущий. */
+        db.stops = db.stops || [];
+        const now = new Date(Number(p.ms) || Date.now()).toISOString();
+        const cur = db.stops.find((s) => s.active && s.machine === p.machine);
+        if (p.on && !cur) db.stops.unshift({ id: 'STOP-' + (db.stops.length + 1), machine: p.machine, reason: p.reason || 'Простой',
+          comment: p.text || '', start: now, finish: '', active: true, until: p.until || '' });
+        if (p.on && cur && p.text) cur.comment = [cur.comment, p.text].filter(Boolean).join(' · ');
+        if (!p.on && cur) { cur.active = false; cur.finish = now; }
+        out = view(me); break;
+      }
       case 'taskRead': {
         const t = task(p.n);
         if (t && t.delivery && !t.delivery.read) t.delivery.read = new Date().toISOString();
