@@ -120,6 +120,12 @@ h1, h2, h3, p { margin: 0; }
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .tile { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
 .tile.problem { background: var(--red-ll); border-color: var(--red-line); }
+/* Плитка станка с кнопкой простоя под ней (04.10) */
+.tile-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tile-wrap .tile { flex: 1 1 auto; }
+.btn.tile-stop { height: 42px; min-height: 42px; font-size: 14px; border-radius: 14px; background: var(--card);
+  border: 1.5px solid var(--red-line); color: var(--red-t); font-weight: 700; }
+.btn.tile-stop.go { border-color: var(--green); color: var(--green); }
 .tile .name { font-size: 16px; font-weight: 700; }
 .dot { width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; }
 .bar { height: 6px; border-radius: 3px; background: #ECE7DC; overflow: hidden; }
