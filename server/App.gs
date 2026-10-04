@@ -45,7 +45,7 @@ var ПРИЛ_АДРЕС = 'https://naxtenus.github.io/rzds-app/';
 var ПРИЛ_ВЛАДЕЛЕЦ = 'владелец';
 var ПРИЛ_ВХОДОВ = 3;          // на сколько телефонов (или Safari + иконка) годится один код
 var ПРИЛ_ДНЕЙ_ВХОДА = 90;     // вход, которым не пользовались столько дней, выключается
-var ПРИЛ_ПРАВКИ = { decide: 1, undecide: 1, mark: 1, taskSave: 1, taskUpdate: 1, taskComment: 1,
+var ПРИЛ_ПРАВКИ = { downtime: 1, decide: 1, undecide: 1, mark: 1, taskSave: 1, taskUpdate: 1, taskComment: 1,
   taskRead: 1, settingsSave: 1, checklistSave: 1, moveApply: 1, taskCheck: 1, orderSay: 1 };
 
 /* ------------------------------------------------ память одного запроса
@@ -132,7 +132,7 @@ function Прил_действие_(a, p) {
     return v;
   };
 
-  var ЧАСТИ = { decide: 'ф', undecide: 'ф', mark: 'ф', taskSave: 'з', taskUpdate: 'з', taskComment: 'з',
+  var ЧАСТИ = { downtime: '-', decide: 'ф', undecide: 'ф', mark: 'ф', taskSave: 'з', taskUpdate: 'з', taskComment: 'з',
     taskRead: 'з', taskCheck: 'з', settingsSave: '-', checklistSave: '-', moveApply: '-' };
   switch (a) {
     case 'ping': return { ok: true };
@@ -158,6 +158,7 @@ function Прил_действие_(a, p) {
     case 'checklistSave': if (!вл) break; Прил_чекЛистЗаписать_(s_(p.res), p.items || []); return сделано();
     case 'movePreview': if (!вл) break; return Прил_сдвиг_(s_(p.op), s_(p.start), false, me.name);
     case 'moveApply': if (!вл) break; var сд = Прил_сдвиг_(s_(p.op), s_(p.start), true, me.name); var v2 = сделано(); v2.moved = сд; return v2;
+    case 'downtime': if (!вл) break; Прил_простой_(me, p); return сделано();
     case 'pushKey': return { key: ВебПуш_публичный_() };
     case 'pushSubscribe': Прил_подписка_(me, p.sub || {}, s_(p.ua)); return { ok: true };
     case 'pushTest':
@@ -528,7 +529,7 @@ function Прил_планЧасть_(заново) {
   });
   var рабочие = readTable_(SH.WRK, COL_WRK).filter(function (r) { return bool_(r['Активен']); })
     .map(function (r) { return { id: s_(r['Имя']), name: s_(r['Имя']), res: parseList_(r['Ресурсы']) }; });
-  var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие, at: Date.now() };
+  var часть = { ops: ops, orders: заказы, resources: ресурсы, people: рабочие, stops: Прил_простоиЧасть_(eng), at: Date.now() };
   Прил_кэшПоложить_(c, ключ, часть, ПРИЛ_КЭШ_СЕК);
   if (__прил) __прил.план = часть;
   Прил_засечь_('расчёт плана', t0);
@@ -665,7 +666,7 @@ function Прил_вид_(me) {
     me: { role: 'owner', name: me.name, id: 'owner' }, now: new Date().toISOString(),
     people: часть.people, resources: часть.resources, orders: часть.orders, ops: ops,
     pending: pending, decided: данные.решённые, tasks: задачи,
-    settings: Прил_настройкиВсе_(), checklists: чек,
+    settings: Прил_настройкиВсе_(), checklists: чек, stops: часть.stops || [],
   };
 }
 
