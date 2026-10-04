@@ -2,7 +2,7 @@
    ниже — что делает каждый станок прямо сейчас. */
 
 import { esc, icon, dayTitle, hhmm, ago, sameDay } from '../util.js';
-import { tabbar, opL } from '../ui.js';
+import { tabbar, opL, refreshBtn, reloadData } from '../ui.js';
 import { store } from '../store.js';
 import { thumbs } from '../photo.js';
 
@@ -100,7 +100,7 @@ export function render() {
         <h1 class="title">Сегодня</h1>
         <div class="sub">${dayTitle(now)}</div>
       </div>
-      <div style="display:flex;gap:8px"><a class="icon-btn" href="#/scan" aria-label="Сканировать QR-код детали">${icon.qr(22)}</a><a class="icon-btn" href="#/search" aria-label="Поиск">${icon.search(22)}</a>
+      <div class="head-btns"><a class="icon-btn" href="#/scan" aria-label="Сканировать QR-код детали">${icon.qr(22)}</a><a class="icon-btn" href="#/search" aria-label="Поиск">${icon.search(22)}</a>${refreshBtn()}
       <a class="icon-btn" href="#/notify" aria-label="Уведомления${bells ? ', ' + bells + ' новых' : ''}">${icon.bell()}${bells ? `<span class="badge">${bells}</span>` : ''}</a></div>
     </header>
     ${statusLine()}
@@ -139,5 +139,6 @@ export const on = {
     store.ui.planSel = el.dataset.op || null;
     location.hash = '#/plan';
   },
-  'refresh': () => store.refresh(),
+  'refresh': () => reloadData(),
+  'reload-data': () => reloadData(),
 };

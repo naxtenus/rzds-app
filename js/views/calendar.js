@@ -94,3 +94,49 @@ export function calOn(st, el) {
   }
   return false;
 }
+
+/* ---------------------------------------------- срок: день, потом время
+   04.10, Павел: «в выборе срока — сегодня, завтра, немедленно, другая
+   дата; при выборе дня должно появляться окно с выбором времени (кроме
+   «немедленно»)». Здесь — это окно: часы с 8 до 20, у «сегодня» прошедшие
+   часы не нажимаются, первым идёт «через час». */
+export const HOURS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+
+/* Через час, округлено вверх до четверти часа: «через час · 11:15». */
+export const soonTime = (now = new Date()) => {
+  const d = new Date(now.getTime() + 60 * 6e4);
+  const m = Math.ceil(d.getMinutes() / 15) * 15;
+  d.setMinutes(m, 0, 0);
+  if (!sameDate(d, now)) return '';
+  return pad(d.getHours()) + ':' + pad(d.getMinutes());
+};
+const sameDate = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+/* day: 0 — сегодня, 1 — завтра. */
+export function dayValue(day, time) {
+  const d = today(); d.setDate(d.getDate() + Number(day || 0));
+  const [h, m] = String(time || '17:00').split(':').map(Number);
+  d.setHours(h, m || 0, 0, 0);
+  return d;
+}
+export const timeOk = (day, time) => !!time && dayValue(day, time) > new Date();
+export function defaultTime(day) {
+  if (Number(day)) return '12:00';
+  if (timeOk(0, '17:00')) return '17:00';
+  return soonTime() || '';
+}
+
+export function timePanel(day, time, idp = 'tp') {
+  day = Number(day || 0);
+  const soon = day === 0 ? soonTime() : '';
+  const list = (soon && !HOURS.includes(soon) ? [{ t: soon, l: 'Через час · ' + soon }] : [])
+    .concat(HOURS.map((t) => ({ t, l: t })));
+  const any = list.some((x) => timeOk(day, x.t));
+  return `<div class="cal tp" id="${idp}" role="group" aria-label="Время">
+    <div class="tp-h">Во сколько — <b>${day ? 'завтра' : 'сегодня'}</b>?</div>
+    ${any ? `<div class="tp-grid">${list.map((x) => {
+      const ok = timeOk(day, x.t);
+      return `<button class="chip${x.t === time ? ' on' : ''}${x.l !== x.t ? ' soon' : ''}" data-act="tp-time" data-v="${x.t}" aria-pressed="${x.t === time}" ${ok ? '' : 'disabled'}>${esc(x.l)}</button>`;
+    }).join('')}</div>` : '<div class="small muted">Сегодня рабочее время прошло — выберите «Завтра» или «Немедленно».</div>'}
+  </div>`;
+}

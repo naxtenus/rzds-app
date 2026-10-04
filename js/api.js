@@ -75,8 +75,22 @@ export const deviceId = () => {
   } catch (e) { return ''; }
 };
 
-export const api = (action, payload) => backend().call(action,
-  action === 'login' ? Object.assign({ dev: deviceId() }, payload) : payload, session.get() || {});
+/* Сколько запросов, начатых человеком, сейчас в пути — для кружка вверху
+   экрана (04.10). Фоновые (обновление раз в минуту, рассылка, «дошло»,
+   миниатюры фото) не считаются — иначе кружок мигал бы сам по себе. */
+const QUIET = new Set(['load', 'flush', 'ack', 'photo', 'ping']);
+export const net = { busy: 0 };
+const busyEvt = () => { try { window.dispatchEvent(new Event('rzds-busy')); } catch (e) {} };
+
+export const api = (action, payload) => {
+  const p = backend().call(action,
+    action === 'login' ? Object.assign({ dev: deviceId() }, payload) : payload, session.get() || {});
+  if (QUIET.has(action)) return p;
+  net.busy++; busyEvt();
+  const done = () => { net.busy--; busyEvt(); };
+  p.then(done, done);
+  return p;
+};
 
 /* Разослать уведомления, которые сервер поставил в очередь, — отдельным
    запросом, не задерживая ответ на нажатие. Ждать его незачем. */

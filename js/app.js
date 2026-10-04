@@ -2,7 +2,7 @@
    обработка нажатий, фоновое обновление. */
 
 import { store } from './store.js';
-import { session } from './api.js';
+import { session, net } from './api.js';
 import { setBadge } from './push.js';
 import { esc } from './util.js';
 import * as ob from './outbox.js';
@@ -23,6 +23,16 @@ import * as qr from './views/qr.js';
 import { viewer } from './photo.js';
 
 const root = document.getElementById('app');
+
+/* Кружок вверху: запрос к серверу в пути (04.10, просьба Павла — «чтобы было
+   видно, что запрос выполняется»). Живёт вне #app, чтобы перерисовка
+   экрана его не дёргала. */
+const spin = document.createElement('div');
+spin.className = 'net-spin'; spin.setAttribute('role', 'status'); spin.setAttribute('aria-label', 'Связь с сервером…');
+spin.innerHTML = '<i></i>'; spin.hidden = true;
+document.body.appendChild(spin);
+function updateSpin() { spin.hidden = !(net.busy > 0 || store.loud || store.sending); }
+window.addEventListener('rzds-busy', updateSpin);
 
 const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, order, search, checklists, route: qr.route, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
 const WORKER = { shift, task, notify, sessions, order, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
@@ -75,6 +85,7 @@ function render() {
   }
   if (r.view.mount) r.view.mount(root, r.params);
   applyBusy();
+  updateSpin();
   if (reloadWanted && !reloadTimer) reloadTimer = setTimeout(() => { reloadTimer = 0; if (reloadWanted) reloadIfIdle(); }, 1500);
   const pending = (store.data && store.data.pending) || [];
   setBadge(store.me && store.me.role === 'owner' ? pending.length : 0);

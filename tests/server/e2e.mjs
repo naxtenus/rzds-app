@@ -128,6 +128,12 @@ await sleep(1500);
 const wt = () => wp.evaluate(() => document.getElementById("app").innerText);
 await expect((await wt()).toLowerCase().includes("моя смена") && (await wt()).includes("Подготовить заготовки"), "рабочий видит смену и поручение");
 await wp.screenshot({ path: `${OUT}/e4-worker.png` });
+/* В выходной или вечером текущего задания может не быть — открываем первую
+   операцию участка по QR-ссылке (#/op/…), как сделал бы рабочий у детали. */
+if (!(await wp.$('.shift-card'))) {
+  const first = JSON.parse(run(`JSON.stringify(Прил_вид_({ role: 'worker', name: 'Слесарь' }).ops.filter(function(o){ return o.status !== 'выполнено'; }).map(function(o){ return o.code; })[0] || '')`));
+  await wp.evaluate((c) => { location.hash = '#/op/' + encodeURIComponent(c); }, first); await sleep(1200);
+}
 const hasStart = await wp.$('[data-act="mark"][data-w="start"]');
 if (hasStart) { await hasStart.click(); await sleep(1500); }
 /* фото к комментарию — настоящая камера заменена файлом */
@@ -182,6 +188,8 @@ await expect((acts.flush || 0) > 0, "телефон просит разосла�
 
 /* план: перенос этапа с предпросмотром */
 await go("#/plan");
+/* выходной — этапов сегодня нет: листаем вперёд до первого рабочего дня */
+for (let i = 0; i < 7 && !(await page.$('.blk[data-drag]')); i++) { await page.evaluate(() => document.querySelector('[data-act="day"][data-d="1"]').click()); await sleep(400); }
 const blk = await page.$('.blk[data-drag]');
 if (blk) {
   await blk.evaluate((e) => e.click()); await sleep(600);

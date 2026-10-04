@@ -49,21 +49,35 @@ export const store = {
     if (res && res.me) { this.data = res; this.syncedAt = Date.now(); this.offline = false; this.error = ''; this.persist(); }
   },
 
-  async refresh(quiet) {
-    if (this.loading) return;
+  /* Свежие данные. Если загрузка уже идёт (фоновая), а человек нажал
+     «Обновить» — не стартуем вторую, а ждём текущую, показывая крутилку. */
+  refresh(quiet) {
+    if (this.loading) {
+      if (!quiet && !this.loud) { this.loud = true; this.emit(); }
+      return this._loadP;
+    }
+    this._loadP = this._refresh(quiet);
+    return this._loadP;
+  },
+  async _refresh(quiet) {
     /* Пока в «Исходящих» что-то лежит, свежие данные с сервера стёрли бы
        с экрана то, что человек уже нажал. Сначала — отправить. */
     if (outbox.size) { await this.sendOutbox(); if (outbox.size) return; }
     this.loading = true;
+    this.loud = !quiet;
     if (!quiet) this.emit();
     try {
       this.took(await api('load'));
+      if (this.ui.askRefresh) this.say('Обновлено ✓');
     } catch (e) {
       if (e.code === 'auth') { this.logout(); return; }
       this.offline = true;
       this.error = e.message;
+      if (this.ui.askRefresh) this.say('Не обновилось: ' + e.message, 'error');
     } finally {
       this.loading = false;
+      this.loud = false;
+      this.ui.askRefresh = false;
       this.emit();
     }
   },
@@ -71,6 +85,13 @@ export const store = {
   /* optimistic(data) меняет копию данных так, как сервер её изменит.
      Нет связи — нажатие не откатывается, а ложится в «Исходящие». */
   async act(action, payload, optimistic, okText) {
+    /* Пока запрос в пути — вверху крутится кружок (04.10): даже если кнопка
+       после нажатия исчезла с экрана, видно, что дело ещё идёт. */
+    this.inflight = (this.inflight || 0) + 1;
+    try { return await this._act(action, payload, optimistic, okText); }
+    finally { this.inflight--; this.emit(); }
+  },
+  async _act(action, payload, optimistic, okText) {
     const before = this.data;
     if (optimistic && this.data) {
       const copy = JSON.parse(JSON.stringify(this.data));
@@ -89,7 +110,6 @@ export const store = {
     };
     /* Уже что-то ждёт — это нажатие встаёт за ним: порядок важен. */
     if (canQueue && outbox.size) { const r = toOutbox('', true); this.sendOutbox(); return r; }
-    this.inflight = (this.inflight || 0) + 1;
     try {
       const res = await api(action, body);
       this.took(res);
@@ -104,8 +124,6 @@ export const store = {
       this.say(e.message || 'Не получилось', 'error');
       this.emit();
       return null;
-    } finally {
-      this.inflight--;
     }
   },
 

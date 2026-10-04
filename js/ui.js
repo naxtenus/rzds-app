@@ -1,6 +1,7 @@
 /* Общие куски экранов: вкладки, виды важности и статусов, подписи. */
 
 import { esc, icon, initial, dueText, isOverdue } from './util.js';
+import { store } from './store.js';
 
 /* Важность — те же четыре ступени, что в планировщике (лист «Задачи»). */
 export const WEIGHTS = ['срочно', 'важно', 'обычная', 'потом'];
@@ -79,3 +80,8 @@ export const taskExtras = (t) => {
   return (t.repeat ? '<span class="muted" title="Повторяется" aria-label="Повторяется">🔁</span>' : '') +
     (it.length ? `<span class="muted strong" style="${d === it.length ? 'color:var(--green)' : ''}" aria-label="Пункты: ${d} из ${it.length}">☑ ${d}/${it.length}</span>` : '');
 };
+
+/* Кнопка «Обновить» на главном экране (04.10, просьба Павла). Пока идёт
+   загрузка — крутится; итог — «Обновлено ✓» или почему не вышло. */
+export const refreshBtn = () => `<button class="icon-btn${store.loud ? ' spinning' : ''}" data-act="reload-data" aria-label="Обновить">${icon.refresh(22)}</button>`;
+export const reloadData = () => { store.ui.askRefresh = true; return store.refresh(); };

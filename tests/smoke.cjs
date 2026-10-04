@@ -74,6 +74,18 @@ const expect = (cond, msg) => { if (!cond) { errors.push('FAIL: ' + msg); consol
   expect(text().includes('Поручить: Слесарь'), 'кнопка меняется на «Поручить: Слесарь»');
   expect($('[data-bind="text"]').value === 'Проверить биение шпинделя', 'текст не потерялся при нажатии');
   await click('[data-act="set"][data-k="weight"][data-v="срочно"]');
+  console.log('Срок: сегодня, завтра, немедленно');
+  expect(['today', 'tom', 'now', 'pick'].every((k) => $('[data-act="set"][data-k="due"][data-v="' + k + '"]')) && document.querySelectorAll('[data-act="set"][data-k="due"]').length === 4, 'четыре кнопки срока');
+  await click('[data-act="set"][data-k="due"][data-v="tom"]');
+  expect(!!$('#tp') && text().includes('Во сколько — завтра') && !!$('#tp .chip.on'), 'завтра → окно времени, время выбрано');
+  await click('#tp [data-act="tp-time"][data-v="15:00"]');
+  expect($('[data-act="set"][data-v="tom"]').textContent.includes('15:00'), 'на кнопке «Завтра · 15:00»');
+  await click('[data-act="set"][data-k="due"][data-v="today"]');
+  expect(!!$('#tp') && text().includes('Во сколько — сегодня'), 'сегодня → окно времени');
+  const pastH = [...document.querySelectorAll('#tp [data-act="tp-time"]')].filter((b) => b.disabled).length;
+  expect(new Date().getHours() < 8 || pastH > 0, 'прошедшие часы сегодня не нажимаются (' + pastH + ')');
+  await click('[data-act="set"][data-k="due"][data-v="now"]');
+  expect(!$('#tp') && text().includes('Поручить немедленно: Слесарь') && text().includes('⚡ Немедленно» сразу'), 'немедленно: без окна времени, кнопка «Поручить немедленно»');
   console.log('Календарь');
   await click('[data-act="set"][data-k="due"][data-v="pick"]');
   expect(!!$('.cal') && document.querySelectorAll('.cal-d').length >= 28, 'календарь месяца виден сразу, без нажатий');
@@ -103,8 +115,16 @@ const expect = (cond, msg) => { if (!cond) { errors.push('FAIL: ' + msg); consol
   await sleep(300);
   expect(text().includes('Как дела с прутком?'), 'комментарий добавлен');
   await click('[data-act="move"]');
-  await click('[data-act="move-to"]');
-  expect(text().includes('Перенёс') || true, 'перенос');
+  expect(['Сегодня', 'Завтра', 'Немедленно', 'Другая дата'].every((l) => [...document.querySelectorAll('.chips .chip')].some((b) => b.textContent.includes(l))), 'перенос: сегодня, завтра, немедленно, другая дата');
+  await click('[data-act="move-day"][data-v="1"]');
+  expect(!!$('#mtp') && text().includes('Во сколько — завтра'), 'перенос на завтра: окно выбора времени');
+  await click('#mtp [data-act="tp-time"][data-v="10:00"]');
+  await sleep(300);
+  expect(text().includes('завтра 10:00') && text().includes('Перенёс'), 'перенесено на завтра 10:00');
+  await click('[data-act="move"]');
+  await click('[data-act="move-now"]');
+  await sleep(300);
+  expect(text().includes('немедленно'), 'срок — немедленно');
 
   console.log('Ответы');
   await go('#/replies');

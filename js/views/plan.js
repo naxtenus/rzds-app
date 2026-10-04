@@ -231,7 +231,7 @@ function preview() {
   mv.loading = true; mv.error = ''; mv.res = null;
   store.emit();
   const my = mv;
-  api('movePreview', { op: mv.op, start: localIso(new Date(mv.start)) })
+  return api('movePreview', { op: mv.op, start: localIso(new Date(mv.start)) })
     .then((r) => { if (store.ui.mv === my) { my.res = r; } })
     .catch((e) => { if (e.code === 'auth') { store.logout(); return; } if (store.ui.mv === my) my.error = e.message; })
     .finally(() => { if (store.ui.mv === my) { my.loading = false; store.emit(); } });
@@ -336,7 +336,7 @@ export const on = {
     const mv = store.ui.mv;
     if (!mv) return;
     if (!mv.start && mv.cal) mv.start = new Date(mv.cal.date + 'T' + (mv.cal.time || '08:00')).toISOString();
-    preview();
+    return preview();
   },
   'mv-apply': async () => {
     const mv = store.ui.mv;

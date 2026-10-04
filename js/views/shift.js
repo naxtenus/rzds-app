@@ -9,7 +9,7 @@
 
 import { esc, icon, hhmm, dayShort, sameDay, dueText } from '../util.js';
 import { store } from '../store.js';
-import { weightLook, taskExtras } from '../ui.js';
+import { weightLook, taskExtras, refreshBtn, reloadData } from '../ui.js';
 import { pickPhoto, draftThumb } from '../photo.js';
 
 const ACTIVE = ['в работе', 'проблема', 'пауза'];
@@ -146,7 +146,7 @@ export function render() {
         <div class="eyebrow">Моя смена</div>
         <div class="sub" style="margin-top:2px">${esc(me.name || '')} · ${dayShort(new Date())}</div>
       </div>
-      <div style="display:flex;gap:8px"><a class="icon-btn" href="#/scan" aria-label="Сканировать QR-код детали">${icon.qr(22)}</a>
+      <div class="head-btns"><a class="icon-btn" href="#/scan" aria-label="Сканировать QR-код детали">${icon.qr(22)}</a>${refreshBtn()}
       <a class="icon-btn" href="#/notify" aria-label="Уведомления и настройки">${icon.bell()}</a></div>
     </header>
     ${endSoon ? `<div class="info bronze" role="status">${icon.clock(20)}<span>Скоро конец смены — не забудьте отметить, что сделано.</span></div>` : ''}
@@ -190,6 +190,7 @@ export function render() {
 const clearForm = () => { store.ui.shiftForm = null; store.ui.shiftDraft = {}; };
 
 export const on = {
+  'reload-data': () => reloadData(),
   'unfocus': () => { store.ui.focusOp = null; clearForm(); store.emit(); },
   'check-open': (el) => { store.ui.checkOpen = el.dataset.op; store.ui.checked = {}; store.emit(); },
   'check-close': () => { store.ui.checkOpen = null; store.emit(); },
@@ -275,6 +276,6 @@ export const on = {
   },
   'task-done': (el) => {
     const n = Number(el.dataset.n);
-    store.act('taskUpdate', { n, state: 'закрыта' }, (d) => { const x = d.tasks.find((y) => y.n === n); if (x) x.state = 'закрыта'; }, 'Мастер увидит, что сделано');
+    return store.act('taskUpdate', { n, state: 'закрыта' }, (d) => { const x = d.tasks.find((y) => y.n === n); if (x) x.state = 'закрыта'; }, 'Мастер увидит, что сделано');
   },
 };

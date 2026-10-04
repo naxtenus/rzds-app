@@ -10,29 +10,32 @@
 import { esc, icon, initial } from '../util.js';
 import { weightLook, WEIGHTS } from '../ui.js';
 import { store } from '../store.js';
-import { calendar, calInit, calOn, calValue } from './calendar.js';
+import { calendar, calInit, calOn, calValue, timePanel, dayValue, timeOk, defaultTime } from './calendar.js';
 import { pickPhoto, draftThumb } from '../photo.js';
 import { parseLine, repeatText, dueLabel } from '../parse.js';
 
-const nextMonday = () => { const d = new Date(); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); return d; };
-const pad = (n) => String(n).padStart(2, '0');
-const at = (d, h) => { d = new Date(d); d.setHours(h, 0, 0, 0); return d; };
-
-const DUES = () => {
-  const now = new Date();
-  const t17 = at(now, 17);
-  const todayOpt = now < t17 ? { k: 'today', l: 'Сегодня 17:00', v: t17 } : { k: 'today', l: 'Сегодня 20:00', v: at(now, 20) };
-  const tm = new Date(); tm.setDate(tm.getDate() + 1);
-  const mon = nextMonday();
-  return [todayOpt, { k: 'tom', l: 'Завтра 12:00', v: at(tm, 12) },
-    { k: 'mon', l: 'Пн, ' + pad(mon.getDate()) + '.' + pad(mon.getMonth() + 1), v: at(mon, 12) },
-    { k: 'none', l: 'Без срока', v: null }, { k: 'pick', l: 'Другая дата', v: 'pick' }];
-};
-const dueOpts = (f) => (f.dueParsed ? [{ k: 'text', l: dueLabel(new Date(f.dueParsed)), v: new Date(f.dueParsed) }] : []).concat(DUES());
+/* Срок (04.10, просьба Павла): «Сегодня», «Завтра», «Немедленно», «Другая
+   дата». После «Сегодня»/«Завтра» появляется выбор времени; «Немедленно» —
+   срок прямо сейчас, исполнителю уходит уведомление «⚡ Немедленно», которое
+   не исчезает с экрана, пока его не откроют. */
+const dueOpts = (f) => (f.dueParsed ? [{ k: 'text', l: dueLabel(new Date(f.dueParsed)) }] : []).concat([
+  { k: 'today', l: 'Сегодня' + (f.due === 'today' && f.time ? ' · ' + f.time : '') },
+  { k: 'tom', l: 'Завтра' + (f.due === 'tom' && f.time ? ' · ' + f.time : '') },
+  { k: 'now', l: '⚡ Немедленно' },
+  { k: 'pick', l: 'Другая дата' },
+]);
+/* Срок как дата — или null, если ещё не выбран. */
+function dueDate(f) {
+  if (f.due === 'now') return new Date();
+  if (f.due === 'text' && f.dueParsed) return new Date(f.dueParsed);
+  if (f.due === 'pick') return calValue(f.cal);
+  if (f.due === 'today' || f.due === 'tom') return f.time && timeOk(f.due === 'tom' ? 1 : 0, f.time) ? dayValue(f.due === 'tom' ? 1 : 0, f.time) : null;
+  return null;
+}
 
 const WDS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const REPEATS = (f) => {
-  const base = f.due === 'text' && f.dueParsed ? new Date(f.dueParsed) : new Date();
+  const base = dueDate(f) || new Date();
   const wd = (base.getDay() + 6) % 7 + 1;
   const list = [['', 'Не повторять'], ['день', 'Каждый день'], ['будни', 'По будням'],
     ['нед:' + wd, 'Каждый ' + WDS[wd - 1]], ['мес:' + base.getDate(), 'Каждое ' + base.getDate() + '-е']];
@@ -55,7 +58,7 @@ function applyParse(f, d) {
   setIf('repeat', !!r.repeat, r.repeat, '');
   if (!man.due) {
     if (r.due) { f.dueParsed = r.due.toISOString(); f.due = 'text'; auto.due = true; }
-    else if (auto.due) { f.dueParsed = null; f.due = 'today'; auto.due = false; }
+    else if (auto.due) { f.dueParsed = null; f.due = 'today'; f.time = defaultTime(0); auto.due = false; }
   }
   f.parsed = r.found.length ? r : null;
 }
@@ -63,7 +66,7 @@ function applyParse(f, d) {
 const draft = () => {
   if (!store.ui.draft) {
     const q = new URLSearchParams((location.hash.split('?')[1]) || '');
-    store.ui.draft = { text: q.get('text') || '', to: q.get('to') || '', due: 'today', cal: null, weight: 'обычная', order: q.get('order') || '',
+    store.ui.draft = { text: q.get('text') || '', to: q.get('to') || '', due: 'today', time: defaultTime(0), cal: null, weight: 'обычная', order: q.get('order') || '',
       repeat: '', items: [], manual: q.get('order') ? { order: true } : {} };
   }
   return store.ui.draft;
@@ -99,7 +102,8 @@ export function render() {
 
     <section style="display:flex;flex-direction:column;gap:8px">
       <h2 class="section-title" style="text-transform:none;letter-spacing:0;font-size:13px">Срок</h2>
-      <div class="chips">${dueOpts(f).map((o) => `<button class="chip${o.k === f.due ? ' on' : ''}" data-act="set" data-k="due" data-v="${o.k}" aria-pressed="${o.k === f.due}">${o.k === 'pick' ? '' : ''}${o.l}</button>`).join('')}</div>
+      <div class="chips">${dueOpts(f).map((o) => `<button class="chip${o.k === f.due ? ' on' : ''}${o.k === 'now' ? ' now' : ''}" data-act="set" data-k="due" data-v="${o.k}" aria-pressed="${o.k === f.due}">${esc(o.l)}</button>`).join('')}</div>
+      ${f.due === 'today' || f.due === 'tom' ? timePanel(f.due === 'tom' ? 1 : 0, f.time) : ''}
       ${f.due === 'pick' ? calendar(f.cal || (f.cal = calInit())) : ''}
     </section>
 
@@ -140,12 +144,14 @@ export function render() {
       <button class="btn" data-act="nt-photo" style="align-self:flex-start">${icon.camera(20)} ${f.photo ? 'Переснять' : 'Сфотографировать'}</button>
     </section>
 
-    <div class="info">${icon.bell(20)}<span>${isMe
-      ? 'Напомню push-уведомлением за 1 час до срока.'
-      : esc(person.name) + ' получит push сразу. Вы увидите, когда он прочитает и возьмёт в работу.'}</span></div>
+    <div class="info${f.due === 'now' && !isMe ? ' red' : ''}">${icon.bell(20)}<span>${isMe
+      ? (f.due === 'now' ? 'Срок — прямо сейчас.' : 'Напомню push-уведомлением за 1 час до срока.')
+      : f.due === 'now'
+        ? esc(person.name) + ' получит «⚡ Немедленно» сразу — уведомление не уйдёт с экрана, пока он его не откроет.'
+        : esc(person.name) + ' получит push сразу. Вы увидите, когда он прочитает и возьмёт в работу.'}</span></div>
   </main>
   <div class="cta"><div class="in">
-    <button class="btn primary" data-act="save" style="flex:1">${isMe ? 'Поставить себе' : 'Поручить: ' + esc(person.name)}</button>
+    <button class="btn primary" data-act="save" style="flex:1">${isMe ? 'Поставить себе' : (f.due === 'now' ? 'Поручить немедленно: ' : 'Поручить: ') + esc(person.name)}</button>
   </div></div>`;
 }
 
@@ -166,11 +172,13 @@ export const on = {
     f[el.dataset.k] = el.dataset.v;
     (f.manual || (f.manual = {}))[el.dataset.k] = true;
     if (el.dataset.k === 'due' && el.dataset.v === 'pick' && !f.cal) f.cal = calInit();
+    const day = el.dataset.v === 'tom' ? 1 : 0;
+    if (el.dataset.k === 'due' && (el.dataset.v === 'today' || el.dataset.v === 'tom') && !timeOk(day, f.time)) f.time = defaultTime(day);
     store.emit();
-    if (el.dataset.k === 'due' && el.dataset.v === 'pick') {
-      setTimeout(() => document.getElementById('cal')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
-    }
+    const box = el.dataset.k !== 'due' ? '' : el.dataset.v === 'pick' ? 'cal' : (el.dataset.v === 'today' || el.dataset.v === 'tom') ? 'tp' : '';
+    if (box) setTimeout(() => document.getElementById(box)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
   },
+  'tp-time': (el) => { draft().time = el.dataset.v; store.emit(); },
   'cal-day': (el) => { if (calOn(draft().cal, el)) store.emit(); },
   'cal-time': (el) => { if (calOn(draft().cal, el)) store.emit(); },
   'cal-month': (el) => { if (calOn(draft().cal, el)) store.emit(); },
@@ -184,14 +192,12 @@ export const on = {
     const f = draft();
     const text = ((f.parsed && f.parsed.text) || f.text || '').trim();
     if (!text) { store.say('Напишите, что сделать', 'error'); document.querySelector('[data-bind="text"]')?.focus(); return; }
-    const opt = dueOpts(f).find((o) => o.k === f.due);
-    let due = opt && opt.v && opt.v !== 'pick' ? opt.v.toISOString() : '';
-    if (f.due === 'pick') {
-      const v = calValue(f.cal);
-      if (!v) { store.say('Выберите день в календаре', 'error'); return; }
-      due = v.toISOString();
-    }
+    const dv = dueDate(f);
+    if (!dv && f.due === 'pick') { store.say('Выберите день в календаре', 'error'); return; }
+    if (!dv && (f.due === 'today' || f.due === 'tom')) { store.say('Выберите время', 'error'); document.getElementById('tp')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    const due = dv ? dv.toISOString() : '';
     const task = { text, to: f.to, due, weight: f.weight, order: f.order };
+    if (f.due === 'now') task.now = true;
     if (f.repeat) task.repeat = f.repeat;
     if ((f.items || []).length) task.items = f.items.slice();
     if (f.photo) task.photo = f.photo;

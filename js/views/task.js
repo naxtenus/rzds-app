@@ -4,7 +4,7 @@
 import { esc, icon, hhmm, dueText, ago, isOverdue } from '../util.js';
 import { weightLook, WEIGHTS, personName, deliveryState, avatar } from '../ui.js';
 import { store } from '../store.js';
-import { calendar, calInit, calOn, calValue, calSummary } from './calendar.js';
+import { calendar, calInit, calOn, calValue, calSummary, timePanel, dayValue, timeOk } from './calendar.js';
 import { pickPhoto, thumbs, draftThumb } from '../photo.js';
 import { repeatText } from '../parse.js';
 
@@ -55,7 +55,6 @@ function repeatRow(t, worker) {
 }
 
 const pad = (n) => String(n).padStart(2, '0');
-const at = (off, h) => { const d = new Date(); d.setDate(d.getDate() + off); d.setHours(h, 0, 0, 0); return d; };
 
 export function render(params) {
   const d = store.data || {};
@@ -78,7 +77,6 @@ export function render(params) {
     </div></section>` : '';
 
   const moving = store.ui.moving === n;
-  const moves = [['Сегодня 17:00', at(0, 17)], ['Завтра 12:00', at(1, 12)], ['Через 2 дня', at(2, 12)], ['Через неделю', at(7, 12)]];
 
   const comments = (t.comments || []).map((c) => {
     const mine = worker ? c.who === store.me.name : !((d.people || []).some((p) => p.name === c.who));
@@ -96,9 +94,11 @@ export function render(params) {
       <div class="kv"><span class="k">Срок</span><span class="v" style="color:${!done && isOverdue(t.due) ? '#B3261E' : 'inherit'}">${esc(dueText(t.due))}</span>
         <button class="btn bronze" data-act="move" style="height:36px;padding:0 12px">Перенести</button></div>
       ${moving ? `<div class="chips" style="padding:12px 14px;background:var(--bg2)">
-        ${moves.map(([l, v]) => `<button class="chip" style="height:40px" data-act="move-to" data-n="${n}" data-v="${v.toISOString()}">${l}</button>`).join('')}
+        ${[['0', 'Сегодня'], ['1', 'Завтра']].map(([k, l]) => `<button class="chip${store.ui.moveDay === k ? ' on' : ''}" style="height:40px" data-act="move-day" data-v="${k}">${l}</button>`).join('')}
+        <button class="chip now" style="height:40px" data-act="move-now" data-n="${n}">⚡ Немедленно</button>
         <button class="chip${store.ui.moveCal ? ' on' : ''}" style="height:40px" data-act="move-cal">Другая дата</button>
       </div>
+      ${store.ui.moveDay != null ? `<div style="padding:0 14px 14px;background:var(--bg2)">${timePanel(store.ui.moveDay, '', 'mtp')}</div>` : ''}
       ${store.ui.moveCal ? `<div style="padding:0 14px 14px;background:var(--bg2);display:flex;flex-direction:column;gap:10px">
         ${calendar(store.ui.moveCal, 'mcal')}
         <button class="btn primary" data-act="move-cal-ok" data-n="${n}">Перенести на ${esc(calSummary(store.ui.moveCal).toLowerCase())}</button>
@@ -172,10 +172,22 @@ const upd = (n, patch, ok) => store.act('taskUpdate', Object.assign({ n }, patch
 export const on = {
   'toggle-to': () => { store.ui.changeTo = store.ui.changeTo ? null : Number(location.hash.split('/')[2]); store.emit(); },
   'set-to': (el) => { store.ui.changeTo = null; return upd(Number(el.dataset.n), { to: el.dataset.v }, el.dataset.v ? 'Передал — уведомление ушло' : 'Теперь это ваша задача'); },
-  'move': () => { const n = Number(location.hash.split('/')[2]); store.ui.moving = store.ui.moving === n ? null : n; store.ui.moveCal = null; store.emit(); },
-  'move-to': (el) => { store.ui.moving = null; store.ui.moveCal = null; return upd(Number(el.dataset.n), { due: el.dataset.v }, 'Перенёс ✓'); },
+  'move': () => { const n = Number(location.hash.split('/')[2]); store.ui.moving = store.ui.moving === n ? null : n; store.ui.moveCal = null; store.ui.moveDay = null; store.emit(); },
+  'move-day': (el) => {
+    store.ui.moveDay = store.ui.moveDay === el.dataset.v ? null : el.dataset.v; store.ui.moveCal = null; store.emit();
+    setTimeout(() => document.getElementById('mtp')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+  },
+  'tp-time': (el) => {
+    const day = Number(store.ui.moveDay || 0);
+    if (!timeOk(day, el.dataset.v)) return;
+    const v = dayValue(day, el.dataset.v);
+    store.ui.moving = null; store.ui.moveDay = null;
+    return upd(curN(), { due: v.toISOString() }, 'Перенёс ✓');
+  },
+  'move-now': (el) => { store.ui.moving = null; store.ui.moveDay = null; store.ui.moveCal = null; return upd(Number(el.dataset.n), { due: new Date().toISOString() }, 'Срок — немедленно'); },
   'move-cal': () => {
     const t = ((store.data && store.data.tasks) || []).find((x) => x.n === Number(location.hash.split('/')[2]));
+    store.ui.moveDay = null;
     store.ui.moveCal = store.ui.moveCal ? null : calInit(t && t.due && new Date(t.due) > new Date() ? t.due : null);
     store.emit();
     setTimeout(() => document.getElementById('mcal')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);

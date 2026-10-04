@@ -477,9 +477,13 @@ check("напоминания: за час до срока, непрочитан
   pushes.length = 0;
   run("Прил_напоминания_(new Date())");
   eq(pushes.length, 0, "повтор тех же напоминаний");
-  /* утро: 07:50 */
+  /* утро: 07:50. В выходной в демо-плане нет операций — своя задача на
+     сегодня, чтобы сводке было что сказать в любой день недели. */
+  { const td = new Date(); td.setHours(18, 0, 0, 0); post({ a: "taskSave", s: OWN, task: { text: "Для сводки", due: td.toISOString() } }); }
   const m = new Date(); m.setHours(7, 50, 0, 0);
   run("props_().deleteProperty('APP_ENDS')");
+  /* прогон в 07:45–11:00 уже отметил утро вызовом выше — снять отметку */
+  run("Object.keys(props_().getProperties()).forEach(function(k){ if (k.indexOf('APP_REM:утро')===0) props_().deleteProperty(k); })");
   pushes.length = 0;
   run(`Прил_напоминания_(new Date(${m.getTime()}))`);
   truthy(topics().includes("own:morning"), "утренней сводки нет: " + topics().join(" "));
@@ -684,6 +688,25 @@ check("после отметки со смены задачи заново не 
   const r = post({ a: "mark", s: WRK, op: WOP, what: "comment", text: "кэш" });
   truthy(r.tm && r.tm["лист факт"] !== undefined, "факт не перечитан: " + JSON.stringify(r.tm));
   truthy(r.tm["лист задачи"] === undefined, "задачи перечитаны: " + JSON.stringify(r.tm));
+});
+check("исполнитель вернул поручение в работу — мастеру push и Телеграм (04.10)", () => {
+  run("var __ув2 = []; Уведомить_ = function (t, k) { __ув2.push(t); return 'ok'; };");
+  const n = post({ a: "taskSave", s: OWN, task: { text: "Проверить тиски", to: "Слесарь", due: new Date().toISOString(), now: true } }).created;
+  post({ a: "flush", s: OWN });
+  pushes.length = 0;
+  post({ a: "taskUpdate", s: WRK, n, state: "закрыта" });
+  post({ a: "flush", s: OWN });
+  pushes.length = 0;
+  run("__ув2.length = 0");
+  post({ a: "taskUpdate", s: WRK, n, state: "открыта" });
+  post({ a: "flush", s: OWN });
+  truthy(topics().includes("own:task-" + n), "push мастеру: " + topics().join(" "));
+  truthy(j("__ув2").some((t) => /вернул в работу/.test(t)), "Телеграм: " + JSON.stringify(j("__ув2")));
+  eq(post({ a: "load", s: OWN }).tasks.find((x) => x.n === n).state, "открыта", "состояние");
+  pushes.length = 0;
+  post({ a: "taskUpdate", s: WRK, n, state: "открыта" });
+  post({ a: "flush", s: OWN });
+  eq(topics().filter((t) => t === "own:task-" + n).length, 0, "повторное «вернуть» открытой задачи — без уведомления");
 });
 check("прогрев: ping отвечает без входа", () => { eq(post({ a: "ping" }).ok, true, "ping"); });
 

@@ -127,7 +127,7 @@ export const on = {
   'toggle': (el) => {
     const k = el.dataset.k;
     const cur = isOn((store.data && store.data.settings) || {}, k);
-    store.act('settingsSave', { settings: { [k]: !cur } }, (d) => { d.settings = d.settings || {}; d.settings[k] = !cur; });
+    return store.act('settingsSave', { settings: { [k]: !cur } }, (d) => { d.settings = d.settings || {}; d.settings[k] = !cur; });
   },
   'demo-reset': async () => { await store.act('reset', {}); store.say('Демо начато заново'); },
   'logout': () => { if (confirm('Выйти на этом телефоне? Для входа понадобится новый код.')) store.logout(); },
