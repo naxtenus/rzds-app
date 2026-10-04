@@ -12,6 +12,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import crypto from "node:crypto";
+const require_crypto = () => crypto;
 
 const pad = (n, w = 2) => String(n).padStart(w, "0");
 
@@ -62,6 +64,7 @@ class FakeRange {
   getNote() { return this.sheet.notes.get(this.r + ":" + this.c) || ""; }
 }
 class FakeSheet {
+  static обращений = 0;
   constructor(name) {
     this.name = name; this.cells = new Map(); this.maxCols = 40;
     this.validation = new Map(); this.notes = new Map();
@@ -85,8 +88,29 @@ class FakeSheet {
     return m;
   }
   getMaxColumns() { return Math.max(this.maxCols, this.getLastColumn()); }
-  getRange(r, c, nr = 1, nc = 1) { return new FakeRange(this, r, c, nr, nc); }
-  getDataRange() { return new FakeRange(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
+  getRange(r, c, nr = 1, nc = 1) { FakeSheet.обращений++; return new FakeRange(this, r, c, nr, nc); }
+  getDataRange() {
+    FakeSheet.обращений++;
+    return new FakeRange(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn()));
+  }
+  getMaxRows() { return Math.max(1000, this.getLastRow()); }
+  /* Вставка и удаление строк сдвигают клетки — как в настоящей таблице. */
+  insertRowsBefore(r, n) {
+    const m = new Map();
+    for (const [k, v] of this.cells) { const [rr, cc] = k.split(":").map(Number); m.set((rr >= r ? rr + n : rr) + ":" + cc, v); }
+    this.cells = m;
+  }
+  deleteRows(r, n) {
+    const m = new Map();
+    for (const [k, v] of this.cells) {
+      const [rr, cc] = k.split(":").map(Number);
+      if (rr >= r && rr < r + n) continue;
+      m.set((rr >= r + n ? rr - n : rr) + ":" + cc, v);
+    }
+    this.cells = m;
+  }
+  deleteRow(r) { this.deleteRows(r, 1); }
+  insertColumnsAfter() {}
   appendRow(vals) {
     const r = this.getLastRow() + 1;
     vals.forEach((v, j) => this._set(r, j + 1, v));
@@ -136,6 +160,7 @@ class FakeCalendar {
 }
 
 /* =========================================================== сборка среды */
+export { FakeSheet };
 export function makeEnv(opts = {}) {
   const state = {
     props: new Map(), spreadsheets: new Map(), calendars: [],
@@ -151,7 +176,9 @@ export function makeEnv(opts = {}) {
       "yyyy": d.getFullYear(), "MM": pad(d.getMonth() + 1), "dd": pad(d.getDate()),
       "HH": pad(d.getHours()), "mm": pad(d.getMinutes()), "ss": pad(d.getSeconds()),
     };
-    return pattern.replace(/yyyy|MM|dd|HH|mm|ss/g, m => p[m]);
+    /* как SimpleDateFormat: в кавычках — буквально («'T'») */
+    return pattern.split("'").map((part, i) => i % 2 ? part
+      : part.replace(/yyyy|MM|dd|HH|mm|ss/g, m => p[m])).join("");
   };
 
   const g = {
@@ -168,8 +195,12 @@ export function makeEnv(opts = {}) {
         getProperty: k => (state.props.has(k) ? state.props.get(k) : null),
         setProperty: (k, v) => { state.props.set(k, String(v)); },
         deleteProperty: k => { state.props.delete(k); },
-        getProperties: () => Object.fromEntries(state.props),
-        setProperties: m => { Object.keys(m).forEach(k => state.props.set(k, String(m[k]))); },
+        getProperties: () => { state.propReads = (state.propReads || 0) + 1; return Object.fromEntries(state.props); },
+        setProperties: (o, всеПрочие) => {
+          if (всеПрочие) state.props.clear();
+          for (const k of Object.keys(o)) state.props.set(k, String(o[k]));
+        },
+        getKeys: () => [...state.props.keys()],
       }),
     },
     SpreadsheetApp: {
@@ -235,6 +266,11 @@ export function makeEnv(opts = {}) {
         return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
       }),
       formatDate: fmt,
+      Charset: { UTF_8: "UTF_8" },
+      base64EncodeWebSafe: (x) => Buffer.from(String(x), "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_"),
+      base64Encode: (x) => Buffer.from(String(x), "utf8").toString("base64"),
+      computeDigest: (alg, s) => Array.from(require_crypto().createHash("sha256").update(String(s)).digest()).map(b => b > 127 ? b - 256 : b),
+      DigestAlgorithm: { SHA_256: "SHA_256" },
       /* Паузу не спим по-настоящему — только считаем: проверкам важно, что
          повтор выждал, а не чтобы они шли на секунды дольше. */
       sleep: ms => { state.slept += ms; },
@@ -251,8 +287,18 @@ export function makeEnv(opts = {}) {
         get: k => (state.cache.has(k) ? state.cache.get(k) : null),
         put: (k, v) => { state.cache.set(k, String(v)); },
         remove: k => { state.cache.delete(k); },
-        getAll: ks => Object.fromEntries(ks.filter(k => state.cache.has(k)).map(k => [k, state.cache.get(k)])),
-        putAll: m => { Object.keys(m).forEach(k => state.cache.set(k, String(m[k]))); },
+        removeAll: ks => { ks.forEach(k => state.cache.delete(k)); },
+        /* Настоящий кэш держит до 100 КБ на значение — проверяем, чтобы
+           куски не оказались больше, чем пропустит Google. */
+        getAll: ks => { state.cacheReads = (state.cacheReads || 0) + 1; const o = {}; ks.forEach(k => { if (state.cache.has(k)) o[k] = state.cache.get(k); }); return o; },
+        putAll: (o) => {
+          for (const k of Object.keys(o)) {
+            const v = String(o[k]);
+            if (Buffer.byteLength(v, "utf8") > 100 * 1024) throw new Error("кэш: значение больше 100 КБ — " + k);
+            if (Buffer.byteLength(k, "utf8") > 250) throw new Error("кэш: ключ длиннее 250 байт");
+            state.cache.set(k, v);
+          }
+        },
       }),
     },
     ScriptApp: {
@@ -274,6 +320,8 @@ export function makeEnv(opts = {}) {
           everyMinutes: m => { t._min = m; return api; },
           forSpreadsheet: s => { t._ss = s && s.getId ? s.getId() : String(s); return api; },
           onOpen: () => { t._kind = "onOpen"; return api; },
+          onChange: () => { t._kind = "onChange"; return api; },
+          onEdit: () => { t._kind = "onEdit"; return api; },
           create: () => {
             state.triggers.push({ getHandlerFunction: () => fn, hour: t._h,
                                   weekDay: t._wd || null, minutes: t._min || null,

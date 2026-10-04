@@ -708,6 +708,46 @@ check("исполнитель вернул поручение в работу �
   post({ a: "flush", s: OWN });
   eq(topics().filter((t) => t === "own:task-" + n).length, 0, "повторное «вернуть» открытой задачи — без уведомления");
 });
+console.log("\n10. Простой станка с телефона владельца");
+check("«Станок стоит» с телефона — простой в плане, в виде владельца, у пульта; «Снова работает» закрывает", () => {
+  const v = post({ a: "downtime", s: OWN, cid: "dt-1", machine: M, on: true, reason: "Поломка станка", text: "течёт масло", hours: 2, ms: Date.now() - 20 * 60000 });
+  truthy(!v.error, v.error);
+  const st = (v.stops || []).find((x) => x.machine === M && x.active);
+  truthy(st, "в виде владельца нет идущего простоя: " + JSON.stringify(v.stops));
+  eq(st.reason, "Поломка станка", "причина"); truthy(/течёт масло/.test(st.comment), "слова: " + st.comment);
+  truthy(Math.abs(new Date(st.start) - (Date.now() - 20 * 60000)) < 90000, "начало — время нажатия: " + st.start);
+  const plan = j(`readPlan_().operations.filter(function(o){return o.kind==='stop' && o.machine===${JSON.stringify(M)}})`);
+  truthy(plan.some((o) => o.status === "в работе"), "в плане нет строки-простоя");
+  const жур = j("журналСтанка_(20)");
+  truthy(жур.some((x) => x.machine === M && /Станок стоит: Поломка станка/.test(x.text) && /телефон/.test(x.who)), "в журнале станка: " + JSON.stringify(жур.slice(0, 3)));
+  const повтор = post({ a: "downtime", s: OWN, cid: "dt-1", machine: M, on: true, reason: "Поломка станка", ms: Date.now() });
+  eq(повтор.repeat, true, "повтор того же нажатия не выполняется второй раз");
+  const w = post({ a: "downtime", s: OWN, cid: "dt-2", machine: M, on: false, ms: Date.now() });
+  truthy(!(w.stops || []).some((x) => x.machine === M && x.active), "простой не закрылся");
+  const закрыт = (w.stops || []).find((x) => x.id === st.id);
+  truthy(закрыт && закрыт.finish && закрыт.min >= 19, "закрытый простой с длительностью: " + JSON.stringify(закрыт));
+  return "простой " + закрыт.min + " мин";
+});
+check("рабочему «Станок стоит» с телефона недоступно", () => {
+  const r = post({ a: "downtime", s: WRK, machine: M, on: true, reason: "Другое" });
+  truthy(/только владелец/.test(r.error || ""), "ответ: " + JSON.stringify(r).slice(0, 200));
+});
+console.log("\n11. Фото с телефона — в карточке заказа в плане");
+check("снимок к проблеме и в переписке по заказу — в «Фото» карточки заказа; план отдаёт снимок по номеру", () => {
+  const заказ = j(`readPlan_().operations.filter(function(o){return o.id===${JSON.stringify(WOP)}})[0].order`);
+  post({ a: "orderSay", s: WRK, order: заказ, text: "так зажали", photo: PNG });
+  const KEY = JSON.stringify({ k: run("accessKeys_().owner") });
+  const r = j(`apiOrderPhotos(${JSON.stringify(JSON.stringify({ key: JSON.parse(KEY), order: заказ }))})`);
+  truthy(r.photos.some((x) => x.id === PH && /отметка по/.test(x.src) && x.text === "проблема: трещина"), "нет фото проблемы: " + JSON.stringify(r.photos));
+  const чат = r.photos.find((x) => x.src === "переписка по заказу");
+  truthy(чат && чат.text === "так зажали" && чат.who === "Слесарь", "нет фото переписки: " + JSON.stringify(r.photos));
+  const ф = j(`apiPhoto(${JSON.stringify(JSON.stringify({ key: JSON.parse(KEY), id: чат.id }))})`);
+  eq(ф.data === PNG, true, "снимок не тот");
+  const доб = j(`apiOrderPhotoAdd(${JSON.stringify(JSON.stringify({ key: JSON.parse(KEY), order: заказ, data: PNG, text: "с компьютера" }))})`);
+  truthy(доб.ok && доб.photos.some((x) => x.id === доб.id && x.src === "заметка в карточке"), "снимок из плана не лёг");
+  eq(post({ a: "photo", s: OWN, id: доб.id }).data === PNG, true, "снимок из плана не открывается в приложении");
+  return r.photos.length + 1 + " снимка у заказа " + заказ;
+});
 check("прогрев: ping отвечает без входа", () => { eq(post({ a: "ping" }).ok, true, "ping"); });
 
 console.log(`\nИтого: ${ok} прошло, ${bad} упало`);

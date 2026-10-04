@@ -4,5 +4,5 @@
 не кладётся. Для запуска: положить его копию в `tests/server/one/`, туда же
 `server/App.gs`, `server/WebPush.gs`, и прогнать `server/patch_kod.py` над Код.gs.
 
-    node app_test.mjs      # 39 проверок: вход, данные, решения, push, задачи
+    node app_test.mjs      # 72 проверки: вход, данные, решения, push, задачи, простой станка, фото в плане
     node e2e.mjs /tmp/e2e  # приложение в Chromium ↔ сервер, со снимками
