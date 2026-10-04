@@ -31,6 +31,35 @@ export const decisionButtons = (r) => {
   return ['Прочитано', ''];
 };
 
+/* Простой станка (04.10.2026, просьба Павла): «Станок стоит» и «Снова
+   работает» прямо с плитки станка. В плане это строка-простой — та же, что
+   ставит пульт у станка: идущая работа встаёт на паузу и после продолжается,
+   всё зависимое сдвигается. Время — момент нажатия (без связи нажатие ждёт в
+   «Исходящих» и уходит со своим временем). */
+const STOP_WHY = ['Поломка станка', 'Поломка инструмента', 'Обслуживание', 'Нет заготовки', 'Нет электричества или воздуха', 'Другое'];
+const STOP_LONG = [{ v: '', t: 'Не знаю' }, { v: '0.5', t: '30 мин' }, { v: '1', t: '1 ч' }, { v: '2', t: '2 ч' }, { v: '4', t: '4 ч' }, { v: 'утро', t: 'До завтра' }];
+const p2 = (n) => String(n).padStart(2, '0');
+const localIso = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+export const stopOf = (d, code) => (d.stops || []).find((s) => s.active && s.machine === code) || null;
+export const stopFor = (from, now) => {
+  const m = Math.max(0, Math.round((now - new Date(from)) / 60000)), h = Math.floor(m / 60);
+  return h ? h + ' ч' + (m % 60 ? ' ' + (m % 60) + ' мин' : '') : m + ' мин';
+};
+function stopForm(d) {
+  const code = store.ui.stopFor;
+  if (!code) return '';
+  const u = store.ui.stopDraft || (store.ui.stopDraft = {});
+  return `<div class="info red stopform" style="display:flex;flex-direction:column;gap:10px;align-items:stretch">
+    <div class="strong" style="font-size:16px">${esc(code)} стоит — почему?</div>
+    <div class="chips">${STOP_WHY.map((w) => `<button class="chip${u.why === w ? ' on' : ''}" data-act="stop-why" data-v="${esc(w)}" aria-pressed="${u.why === w}">${esc(w)}</button>`).join('')}</div>
+    <input id="stop-text" class="field-in" placeholder="Что случилось (можно не писать)" value="${esc(u.text || '')}" autocomplete="off">
+    <div class="small strong">Сколько примерно простоит</div>
+    <div class="chips">${STOP_LONG.map((x) => `<button class="chip${(u.long || '') === x.v ? ' on' : ''}" data-act="stop-long" data-v="${x.v}">${x.t}</button>`).join('')}</div>
+    <div class="btns"><button class="btn danger on" data-act="stop-send" data-res="${esc(code)}">■ Станок стоит</button>
+      <button class="btn" data-act="stop-cancel">Отмена</button></div>
+  </div>`;
+}
+
 export function machineNow(d, res, now) {
   const ops = (d.ops || []).filter((o) => o.res === res.code &&
     (sameDay(o.start, now) || (new Date(o.start) <= now && new Date(o.end) >= now)));
@@ -74,6 +103,18 @@ export function render() {
   const tiles = (d.resources || []).map((res) => {
     const { cur, next } = machineNow(d, res, now);
     const o = cur || null;
+    const st = stopOf(d, res.code);
+    const stopBtn = st
+      ? `<button class="btn tile-stop go" data-act="stop-go" data-res="${esc(res.code)}">▶ Снова работает</button>`
+      : `<button class="btn tile-stop" data-act="stop-open" data-res="${esc(res.code)}">■ Станок стоит</button>`;
+    if (st) {
+      return `<div class="tile-wrap"><button class="tile problem" data-act="open-plan" data-op="${o ? esc(o.code) : ''}">
+      <div class="row-between" style="align-items:center;width:100%"><span class="name">${esc(res.code)}</span><span class="dot" style="background:#C62828"></span></div>
+      <div class="small strong" style="color:#B3261E">Стоит · ${esc(st.reason)}</div>
+      <div class="small muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%">${esc(st.comment || (o ? o.order + ' · на паузе' : 'простой'))}</div>
+      <div class="small muted">с ${hhmm(st.start)} · ${stopFor(st.start, now)}${st.until ? ' · ждём до ' + hhmm(st.until) : ''}</div>
+    </button>${stopBtn}</div>`;
+    }
     const L = o ? opL(o) : { dot: '#9A9F98', text: 'Свободен', color: '#5A5F58' };
     let pct = o ? (o.pct || 0) : 0;
     if (o && o.status === 'в работе' && !o.pct) {
@@ -81,13 +122,13 @@ export function render() {
     }
     const sub = o ? `${esc(o.order)} · ${esc(o.op.toLowerCase())}` : (next ? `${esc(next.order)} · с ${hhmm(next.start)}` : 'Нет задания');
     const time = o ? (o.status === 'проблема' ? 'стоит с ' + hhmm(o.problemAt || o.start) : 'до ' + hhmm(o.end)) : (next ? 'простой до ' + hhmm(next.start) : '—');
-    return `<button class="tile${o && o.status === 'проблема' ? ' problem' : ''}" data-act="open-plan" data-op="${o ? esc(o.code) : ''}">
+    return `<div class="tile-wrap"><button class="tile${o && o.status === 'проблема' ? ' problem' : ''}" data-act="open-plan" data-op="${o ? esc(o.code) : ''}">
       <div class="row-between" style="align-items:center;width:100%"><span class="name">${esc(res.code)}</span><span class="dot" style="background:${L.dot}"></span></div>
       <div class="small strong" style="color:${L.color}">${L.text}</div>
       <div class="small muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%">${sub}</div>
       <div class="bar" style="width:100%"><i style="width:${pct}%;background:${L.dot}"></i></div>
       <div class="small muted">${time}</div>
-    </button>`;
+    </button>${stopBtn}</div>`;
   }).join('');
 
   const mine = (d.tasks || []).filter((t) => !t.to && t.state === 'открыта' && t.due &&
@@ -107,6 +148,7 @@ export function render() {
     ${decide}
     <section aria-label="Станки и участки" style="display:flex;flex-direction:column;gap:10px">
       <div class="row-between"><h2 class="h2">Станки и участки</h2><a class="link-btn" href="#/plan" style="font-size:14px;padding:8px 0">Весь план</a></div>
+      ${stopForm(d)}
       <div class="tiles">${tiles || '<div class="empty">Станки ещё не заведены</div>'}</div>
     </section>
     ${mine.length ? `<section style="display:flex;flex-direction:column;gap:8px">
@@ -138,6 +180,35 @@ export const on = {
   'open-plan': (el) => {
     store.ui.planSel = el.dataset.op || null;
     location.hash = '#/plan';
+  },
+  'stop-open': (el) => {
+    store.ui.stopFor = el.dataset.res; store.ui.stopDraft = { why: '', long: '', text: '' };
+    store.emit();
+    setTimeout(() => { const f = document.querySelector('.stopform'); if (f && f.scrollIntoView) f.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 30);
+  },
+  'stop-cancel': () => { store.ui.stopFor = null; store.emit(); },
+  'stop-why': (el) => { const u = store.ui.stopDraft; u.text = document.querySelector('#stop-text')?.value || ''; u.why = u.why === el.dataset.v ? '' : el.dataset.v; store.emit(); },
+  'stop-long': (el) => { const u = store.ui.stopDraft; u.text = document.querySelector('#stop-text')?.value || ''; u.long = el.dataset.v; store.emit(); },
+  'stop-send': async (el) => {
+    const u = store.ui.stopDraft || {};
+    const text = (document.querySelector('#stop-text')?.value || '').trim();
+    const why = u.why || (text ? 'Другое' : '');
+    if (!why) { store.say('Выберите причину простоя', 'error'); return; }
+    const machine = el.dataset.res, now = new Date();
+    const p = { machine, on: true, reason: why, text, at: localIso(now), ms: now.getTime() };
+    if (u.long === 'утро') { const t = new Date(now); t.setDate(t.getDate() + 1); t.setHours(8, 0, 0, 0); p.until = localIso(t); }
+    else if (u.long) p.hours = Number(u.long);
+    store.ui.stopFor = null;
+    await store.act('downtime', p, (d) => {
+      (d.stops = d.stops || []).unshift({ id: 'новый', machine, reason: why, comment: text, start: now.toISOString(), finish: '', active: true, until: p.until ? new Date(p.until).toISOString() : '' });
+    }, 'Простой отмечен в плане');
+  },
+  'stop-go': async (el) => {
+    const machine = el.dataset.res, now = new Date();
+    await store.act('downtime', { machine, on: false, at: localIso(now), ms: now.getTime() }, (d) => {
+      const s = (d.stops || []).find((x) => x.active && x.machine === machine);
+      if (s) { s.active = false; s.finish = now.toISOString(); }
+    }, 'Станок снова работает — простой закрыт');
   },
   'refresh': () => reloadData(),
   'reload-data': () => reloadData(),
