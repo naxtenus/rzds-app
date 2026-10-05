@@ -20,7 +20,7 @@ import * as order from './views/order.js';
 import * as search from './views/search.js';
 import * as checklists from './views/checklists.js';
 import * as qr from './views/qr.js';
-import { viewer } from './photo.js';
+import { viewer, load as loadPhoto } from './photo.js';
 
 const root = document.getElementById('app');
 
@@ -102,7 +102,8 @@ const GLOBAL = {
   'ob-open': () => { store.ui.outboxOpen = true; store.emit(); },
   'ob-close': () => { store.ui.outboxOpen = false; store.emit(); },
   'ob-send': () => store.sendOutbox(),
-  'ph-open': (el) => { store.ui.photoOpen = el.dataset.id; store.emit(); },
+  'ph-open': (el) => { loadPhoto(el.dataset.id, true); store.ui.photoOpen = el.dataset.id; store.emit(); },
+  'ph-retry': (el, e) => { e.stopPropagation(); loadPhoto(el.dataset.id, true); store.emit(); },
   'ph-close': () => { store.ui.photoOpen = null; store.emit(); },
   'ob-drop': (el) => {
     ob.outbox.remove(el.dataset.cid);

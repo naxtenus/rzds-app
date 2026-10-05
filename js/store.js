@@ -180,6 +180,7 @@ export const store = {
     session.clear();
     outbox.clear();
     try { localStorage.removeItem(CACHE); } catch (e) {}
+    try { if (typeof caches !== 'undefined') caches.delete('rzds-photos').catch(() => {}); } catch (e) {}   // фото — не для следующего, кто войдёт
     this.data = null; this.ui = {};
     location.hash = '#/login';
     this.emit();

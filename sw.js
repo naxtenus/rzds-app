@@ -1,7 +1,7 @@
 /* Служебный работник приложения: хранит само приложение в телефоне (чтобы
    открывалось мгновенно и без связи) и принимает push-уведомления. */
 
-const VERSION = 'rzds-0.6.2';
+const VERSION = 'rzds-0.6.3';
 const SHELL = [
   './', 'index.html', 'app.css', 'config.js', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/mock.js', 'js/push.js', 'js/store.js', 'js/ui.js', 'js/util.js',
@@ -26,7 +26,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== 'rzds-photos').map((k) => caches.delete(k))))   // фото (05.10) — не трогаем
     .then(() => self.clients.claim()));
 });
 

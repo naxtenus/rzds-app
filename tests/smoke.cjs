@@ -315,6 +315,26 @@ const expect = (cond, msg) => { if (!cond) { errors.push('FAIL: ' + msg); consol
   await sleep(250);
   expect(location.hash === '#/plan' && !!$('.sheet') && text().includes('ФДЗ'), 'QR у владельца: план на дне операции');
 
+  console.log('Фото: неудачная загрузка не навсегда (04.10)');
+  {
+    const mock = await import(path.join(APP, 'js/mock.js'));
+    const { api } = await import(path.join(APP, 'js/api.js'));
+    await api('taskComment', { n: 1, text: '', photo: 'data:image/jpeg;base64,/9j/AAAA' });
+    const { store: st } = await import(path.join(APP, 'js/store.js'));
+    await st.refresh(true);
+    const orig = mock.demo.call; let fails = 1;
+    mock.demo.call = async function (a, p, s2) { if (a === 'photo' && fails-- > 0) { const e = new Error('Нет связи с сервером'); e.net = true; throw e; } return orig.call(mock.demo, a, p, s2); };
+    location.hash = '#/notify'; w.dispatchEvent(new w.HashChangeEvent('hashchange')); await sleep(100);
+    await go('#/task/1');
+    await sleep(500);
+    expect(!!$('.ph.bad') && text().includes('ещё раз'), 'не загрузилось — видно и предлагает ещё раз');
+    await click('.ph.bad');
+    await sleep(500);
+    expect(!!$('.ph-full img') && !!$('.ph img'), 'нажал — загрузилось, открылось во весь экран');
+    await click('.ph-close');
+    mock.demo.call = orig;
+  }
+
   console.log('\nОшибок: ' + errors.length);
   errors.forEach((e) => console.log(e));
   process.exit(errors.length ? 1 : 0);

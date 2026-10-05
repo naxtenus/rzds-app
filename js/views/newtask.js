@@ -10,7 +10,7 @@
 import { esc, icon, initial } from '../util.js';
 import { weightLook, WEIGHTS } from '../ui.js';
 import { store } from '../store.js';
-import { calendar, calInit, calOn, calValue, timePanel, dayValue, timeOk, defaultTime } from './calendar.js';
+import { calendar, calInit, calOn, calValue, timePanel, dayValue, timeOk, defaultTime, HOURS } from './calendar.js';
 import { pickPhoto, draftThumb } from '../photo.js';
 import { parseLine, repeatText, dueLabel } from '../parse.js';
 
@@ -173,7 +173,10 @@ export const on = {
     (f.manual || (f.manual = {}))[el.dataset.k] = true;
     if (el.dataset.k === 'due' && el.dataset.v === 'pick' && !f.cal) f.cal = calInit();
     const day = el.dataset.v === 'tom' ? 1 : 0;
-    if (el.dataset.k === 'due' && (el.dataset.v === 'today' || el.dataset.v === 'tom') && !timeOk(day, f.time)) f.time = defaultTime(day);
+    /* Время с прошлого дня оставляем, только если оно есть среди кнопок
+       этого дня: «через час · 22:15» у «завтра» не нарисовано (04.10). */
+    if (el.dataset.k === 'due' && (el.dataset.v === 'today' || el.dataset.v === 'tom') &&
+      (!timeOk(day, f.time) || (day === 1 && !HOURS.includes(f.time)))) f.time = defaultTime(day);
     store.emit();
     const box = el.dataset.k !== 'due' ? '' : el.dataset.v === 'pick' ? 'cal' : (el.dataset.v === 'today' || el.dataset.v === 'tom') ? 'tp' : '';
     if (box) setTimeout(() => document.getElementById(box)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);

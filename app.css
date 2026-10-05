@@ -438,3 +438,9 @@ button.kv { font: inherit; color: inherit; cursor: pointer; }
 .head .head-btns { display: flex; gap: 6px; flex-shrink: 0; }
 .head .head-btns .icon-btn { width: 42px; height: 42px; }
 .head > div:first-child { min-width: 0; }
+
+/* 04.10: фото не загрузилось — видно и можно повторить */
+.ph.bad { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--bronze-d); border-color: var(--bronze); }
+.ph.bad small { font-size: 11px; font-weight: 700; }
+.ph-msg { color: #fff; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; font-size: 16px; max-width: 320px; }
+.ph-msg .btn { background: #fff; color: var(--ink); }

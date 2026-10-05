@@ -44,16 +44,73 @@ export async function shrink(file) {
 }
 
 /* ------------------------------------------------------------- показ */
+/* 04.10, жалоба Павла «ошибка с открытием фотографий». Сервер снимки отдаёт
+   (2–4 с, 200–370 КБ), но раньше одна неудачная попытка — сеть мигнула,
+   сервер не ответил за 25 с — запоминалась навсегда: вместо фото значок «!»
+   до перезапуска приложения, а во весь экран — вечная крутилка. Теперь
+   ошибка не навсегда: через 15 с пробуем сами, нажатие — пробует сразу,
+   во весь экран видно, что случилось, и есть «Повторить». */
 const cache = new Map();      // id → data:-адрес
+const failed = new Map();     // id → { at, why }
 const loading = new Set();
 
-function load(id) {
-  if (!id || cache.has(id) || loading.has(id)) return;
-  loading.add(id);
-  api('photo', { id }).then((r) => { cache.set(id, r.data); })
-    .catch(() => { cache.set(id, ''); })
-    .finally(() => { loading.delete(id); store.emit(); });
+/* 05.10, разбор той же жалобы. Каждый снимок — 200–370 КБ, а миниатюры
+   на экране просили все сразу: восемь фото — это 2–3 МБ одним махом, по
+   сотовой в цеху каждое ползло дольше 25 секунд и падало. Теперь:
+   — не больше двух загрузок одновременно, остальные ждут очереди — первые
+     фото появляются быстро, а не все разом в самом конце;
+   — загруженное фото кладётся в память телефона (Cache Storage) и при
+     следующем открытии приложения берётся оттуда мгновенно, даже без связи. */
+const MAXPAR = 2;
+const queue = [];
+let running = 0;
+const STORE = 'rzds-photos';
+const keyOf = (id) => new Request(location.origin + '/rzds-photo/' + encodeURIComponent(id));
+
+async function fromDisk(id) {
+  try {
+    if (!('caches' in window)) return null;
+    const r = await (await caches.open(STORE)).match(keyOf(id));
+    return r ? await r.text() : null;
+  } catch (e) { return null; }
 }
+function toDisk(id, data) {
+  try { if ('caches' in window) caches.open(STORE).then((c) => c.put(keyOf(id), new Response(data))).catch(() => {}); } catch (e) {}
+}
+
+function pump() {
+  while (running < MAXPAR && queue.length) {
+    const id = queue.shift();
+    running++;
+    api('photo', { id }).then((r) => {
+      if (!r || !/^data:image\//.test(r.data || '')) throw new Error('пустой ответ сервера');
+      cache.set(id, r.data);
+      toDisk(id, r.data);
+    }).catch((e) => {
+      if (e && e.code === 'auth') { store.logout(); return; }
+      failed.set(id, { at: Date.now(), why: (e && e.message) || 'не загрузилось' });
+    }).finally(() => { running--; loading.delete(id); store.emit(); pump(); });
+  }
+}
+
+export function load(id, force) {
+  if (!id || cache.has(id)) return;
+  if (loading.has(id)) {
+    /* Открыли во весь экран то, что стоит в очереди, — пусть грузится первым. */
+    if (force) { const i = queue.indexOf(id); if (i > 0) { queue.splice(i, 1); queue.unshift(id); } }
+    return;
+  }
+  const f = failed.get(id);
+  if (f && !force && Date.now() - f.at < 15000) { setTimeout(() => store.emit(), 15000 - (Date.now() - f.at) + 50); return; }
+  loading.add(id);
+  failed.delete(id);
+  fromDisk(id).then((d) => {
+    if (d && /^data:image\//.test(d)) { cache.set(id, d); loading.delete(id); store.emit(); return; }
+    if (force) queue.unshift(id); else queue.push(id);
+    pump();
+  });
+}
+export const photoState = (id) => (cache.has(id) ? 'ok' : loading.has(id) ? 'loading' : failed.has(id) ? 'failed' : 'none');
 
 /* Ряд миниатюр. ids — номера снимков с сервера. */
 export function thumbs(ids) {
@@ -61,8 +118,9 @@ export function thumbs(ids) {
   return `<div class="ph-row">${ids.map((id) => {
     const d = cache.get(id);
     if (d === undefined) load(id);
-    return `<button class="ph" data-act="ph-open" data-id="${esc(id)}" aria-label="Открыть фото">${d
-      ? `<img src="${d}" alt="">` : d === '' ? icon.alert(18) : '<i class="spinner"></i>'}</button>`;
+    const bad = !d && failed.has(id) && !loading.has(id);
+    return `<button class="ph${bad ? ' bad' : ''}" data-act="ph-open" data-id="${esc(id)}" aria-label="${bad ? 'Фото не загрузилось — нажмите, чтобы повторить' : 'Открыть фото'}">${d
+      ? `<img src="${d}" alt="">` : bad ? `${icon.refresh(18)}<small>ещё раз</small>` : '<i class="spinner"></i>'}</button>`;
   }).join('')}</div>`;
 }
 
@@ -77,8 +135,13 @@ export function draftThumb(data, act = 'ph-drop') {
 export function viewer(id) {
   if (!id) return '';
   const d = cache.get(id);
+  if (!d) load(id);
+  const f = failed.get(id);
+  const bad = !d && f && !loading.has(id);
   return `<div class="ph-full" data-act="ph-close" role="dialog" aria-label="Фото">
-    ${d ? `<img src="${d}" alt="">` : '<i class="spinner" style="color:#fff;width:32px;height:32px"></i>'}
+    ${d ? `<img src="${d}" alt="">`
+      : bad ? `<div class="ph-msg">Фото не загрузилось: ${esc(f.why)}<button class="btn" data-act="ph-retry" data-id="${esc(id)}">${icon.refresh(18)} Повторить</button></div>`
+      : '<div class="ph-msg"><i class="spinner" style="color:#fff;width:32px;height:32px"></i>Загружаю фото…</div>'}
     <button class="ph-close" data-act="ph-close" aria-label="Закрыть">${icon.close(22)}</button>
   </div>`;
 }

@@ -22,7 +22,10 @@ const live = {
   isDemo: false,
   async call(action, payload = {}, s = {}) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25000);
+    /* Фото туда и обратно — 200–400 КБ: по сотовой в цеху это дольше 25 с
+       (04.10). Таким запросам — минута. */
+    const long = action === 'photo' || !!(payload && (payload.photo || (payload.task && payload.task.photo)));
+    const timer = setTimeout(() => ctrl.abort(), long ? 60000 : 25000);
     let res;
     try {
       res = await fetch(CONFIG.server, {
@@ -35,7 +38,7 @@ const live = {
     } catch (e) {
       /* net — связи нет или ответ потерялся: такое нажатие можно отложить
          и отправить ещё раз (сервер узнает повтор по cid). */
-      const err = new Error(e.name === 'AbortError' ? 'Сервер не ответил за 25 секунд' : 'Нет связи с сервером');
+      const err = new Error(e.name === 'AbortError' ? 'Сервер не ответил за ' + (long ? 'минуту' : '25 секунд') : 'Нет связи с сервером');
       err.net = true;
       throw err;
     } finally { clearTimeout(timer); }
