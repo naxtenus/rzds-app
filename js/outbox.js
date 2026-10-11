@@ -20,7 +20,7 @@ const KEY = 'rzds-outbox';
 /* Что можно отложить. Вход, выдача кодов, подписка на уведомления —
    нельзя: их результат нужен сразу, на экране. */
 export const QUEUEABLE = new Set(['mark', 'taskSave', 'taskUpdate', 'taskComment', 'taskRead',
-  'decide', 'undecide', 'settingsSave', 'checklistSave', 'taskCheck', 'orderSay', 'downtime']);
+  'decide', 'undecide', 'settingsSave', 'checklistSave', 'taskCheck', 'orderSay', 'downtime', 'rework']);
 
 export const outbox = {
   list() { try { return JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) { return []; } },
@@ -56,6 +56,8 @@ export function describe(action, payload) {
     case 'orderSay': return 'Заказ ' + (p.order || '') + ': «' + (p.text || 'фото') + '»';
     case 'taskRead': return 'Прочитал поручение №' + p.n;
     case 'downtime': return (p.on ? 'Станок стоит · ' : 'Станок снова работает · ') + (p.machine || '') + (p.on && p.reason ? ' — ' + p.reason : '');
+    case 'rework': return ({ start: 'Начал доработку', stop: 'Закончил доработку', save: 'Доработка — запись', drop: 'Доработка — убрать' }[p.op] || 'Доработка') +
+      (p.supplier ? ' · ' + p.supplier : '') + (p.what ? ' — ' + p.what : '');
     case 'decide': return (p.yes ? 'Принять' : 'Отклонить') + ' ответ со смены';
     case 'undecide': return 'Вернуть ответ на решение';
     case 'settingsSave': return 'Настройки уведомлений';

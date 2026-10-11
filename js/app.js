@@ -20,6 +20,7 @@ import * as order from './views/order.js';
 import * as search from './views/search.js';
 import * as checklists from './views/checklists.js';
 import * as qr from './views/qr.js';
+import * as rework from './views/rework.js';
 import { viewer, load as loadPhoto } from './photo.js';
 
 const root = document.getElementById('app');
@@ -34,7 +35,7 @@ document.body.appendChild(spin);
 function updateSpin() { spin.hidden = !(net.busy > 0 || store.loud || store.sending); }
 window.addEventListener('rzds-busy', updateSpin);
 
-const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, order, search, checklists, route: qr.route, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
+const OWNER = { today, plan, tasks, task, new: newtask, replies, notify, sessions, order, search, checklists, rework, route: qr.route, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
 const WORKER = { shift, task, notify, sessions, order, scan: qr.scan, op: qr.op, install: { render: login.renderInstall, on: login.on } };
 
 function route() {
@@ -70,12 +71,21 @@ function render() {
   const outbox = waiting ? ob.chip(waiting, store.sending) + (store.ui.outboxOpen ? ob.sheet(ob.outbox.list(), store.sending, (ob.outbox.list()[0] || {}).err) : '') : '';
   root.classList.toggle('has-ob', !!waiting);
   const photo = store.ui.photoOpen ? viewer(store.ui.photoOpen) : '';
-  root.innerHTML = r.view.render(r.params) + outbox + photo + toast + demo;
+  const html = r.view.render(r.params) + outbox + photo + toast + demo;
+  /* Человек печатает — поле не трогаем (жалоба 11.10: «долгий отклик и
+     путает буквы, если быстро печатать»). Раньше экран при каждой паузе в
+     наборе собирался заново, и поле пересоздавалось под пальцами: телефонная
+     клавиатура теряла своё место в тексте, автозамена промахивалась.
+     Теперь тот же экран перерисовывается вокруг поля, а само поле и его
+     родители остаются теми же узлами. */
+  const мягко = key === lastRoute && keep && a.matches('input,textarea') && перерисоватьВокруг(html, a);
+  if (!мягко) root.innerHTML = html;
   if (key !== lastRoute) window.scrollTo(0, 0);
   lastRoute = key;
 
-  Object.keys(typed).forEach((id) => { const el = root.querySelector('#' + id); if (el) el.value = typed[id]; });
-  if (keep) {
+  Object.keys(typed).forEach((id) => { const el = root.querySelector('#' + id); if (el && el !== a) el.value = typed[id]; });
+  if (мягко) { /* поле на месте, фокус и курсор не сбивались */ }
+  else if (keep) {
     const el = keep.id ? root.querySelector('#' + CSS.escape(keep.id)) : root.querySelector(`[data-bind="${keep.bind}"]`);
     if (el) {
       if (keep.value != null && !keep.bind) el.value = keep.value;
@@ -89,6 +99,49 @@ function render() {
   if (reloadWanted && !reloadTimer) reloadTimer = setTimeout(() => { reloadTimer = 0; if (reloadWanted) reloadIfIdle(); }, 1500);
   const pending = (store.data && store.data.pending) || [];
   setBadge(store.me && store.me.role === 'owner' ? pending.length : 0);
+}
+
+/* Перерисовка «вокруг» живого поля: новая разметка строится в стороне,
+   в ней находится двойник поля (тот же id или data-bind), и на каждом
+   уровне от корня до поля заменяются только соседи — сами поле и его
+   родители остаются в документе. Не получилось сопоставить (экран другой
+   формы) — false, и рисуем по-старому. */
+function перерисоватьВокруг(html, a) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const fresh = tpl.content;
+  const twin = a.id ? fresh.querySelector('#' + CSS.escape(a.id))
+    : a.dataset.bind ? fresh.querySelector(`[data-bind="${CSS.escape(a.dataset.bind)}"]`) : null;
+  if (!twin || twin.tagName !== a.tagName) return false;
+  const путь = (n, верх) => { const p = []; for (; n && n !== верх; n = n.parentNode) p.unshift(n); return n === верх ? p : null; };
+  const было = путь(a, root), стало = путь(twin, fresh);
+  if (!было || !стало || было.length !== стало.length || было.some((n, i) => n.tagName !== стало[i].tagName)) return false;
+  let po = root, pn = fresh;
+  for (let i = 0; i < было.length; i++) {
+    const ko = было[i], kn = стало[i];
+    const до = [], после = [];
+    let за = false;
+    Array.from(pn.childNodes).forEach((c) => { if (c === kn) за = true; else (за ? после : до).push(c); });
+    Array.from(po.childNodes).forEach((c) => { if (c !== ko) po.removeChild(c); });
+    до.forEach((c) => po.insertBefore(c, ko));
+    после.forEach((c) => po.appendChild(c));
+    /* Атрибуты родителей (классы, стили) — как в новой разметке; у самого
+       поля значение не трогаем: в нём то, что набрано. */
+    Array.from(ko.attributes).forEach((at) => { if (!kn.hasAttribute(at.name) && at.name !== 'value') ko.removeAttribute(at.name); });
+    Array.from(kn.attributes).forEach((at) => { if (at.name !== 'value' && ko.getAttribute(at.name) !== at.value) ko.setAttribute(at.name, at.value); });
+    po = ko; pn = kn;
+  }
+  /* Значение поля. Набранное человеком — главное. Но если экран сам сменил
+     значение (кнопки «+1» у количества), новая разметка несёт другое
+     значение, чем прошлая: тогда ставим его. */
+  const ta = a.tagName === 'TEXTAREA';
+  const прежнее = ta ? a.defaultValue : (a.getAttribute('value') || '');
+  const новое = ta ? twin.defaultValue : (twin.getAttribute('value') || '');
+  if (новое !== прежнее) {
+    if (ta) a.defaultValue = новое; else a.setAttribute('value', новое);
+    if (a.value !== новое) a.value = новое;
+  }
+  return true;
 }
 
 /* ------------------------------------------------------------ события */

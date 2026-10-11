@@ -91,6 +91,10 @@ function seed() {
     },
     photos: {},
     nextPhoto: 1,
+    rework: [
+      { n: 1, supplier: 'ООО Литейщик', where: 'фре1360', order: 'ФДЗ', what: 'расточка, раковины в отливке', qty: '2', comment: '',
+        who: 'Павел (телефон)', startMs: new Date(at(-1, 9)).getTime(), finishMs: new Date(at(-1, 10, 40)).getTime() },
+    ],
   };
 }
 
@@ -143,7 +147,17 @@ const view = (me) => {
     pending: db.pending, decided: db.decided,
     tasks: db.tasks.filter((t) => t.state !== 'убрана'),
     settings: db.settings, checklists: db.checklists || {}, stops: db.stops || [],
+    rework: reworkPart(),
   };
+};
+/* Доработки за поставщиков (11.10): как Прил_доработкиЧасть_ на сервере. */
+const reworkPart = () => {
+  const list = (db.rework || []).map((x) => Object.assign({}, x, { running: !x.finishMs,
+    min: Math.round(((x.finishMs || Date.now()) - x.startMs) / 60000) }));
+  const count = {};
+  list.forEach((x) => { count[x.supplier] = (count[x.supplier] || 0) + 1; });
+  return { running: list.filter((x) => x.running), recent: list.filter((x) => !x.running && x.startMs > Date.now() - 14 * 864e5),
+    suppliers: Object.keys(count).sort((a, b) => count[b] - count[a]) };
 };
 
 /* Повтор: следующий подходящий день после прежнего срока, не раньше завтра. */
@@ -259,6 +273,32 @@ export const demo = {
           comment: p.text || '', start: now, finish: '', active: true, until: p.until || '' });
         if (p.on && cur && p.text) cur.comment = [cur.comment, p.text].filter(Boolean).join(' · ');
         if (!p.on && cur) { cur.active = false; cur.finish = now; }
+        out = view(me); break;
+      }
+      case 'rework': {
+        /* Доработка за поставщика (11.10): как Прил_доработка_ на сервере. */
+        db.rework = db.rework || [];
+        const ms = Number(p.ms) || Date.now();
+        const tms = (v) => (v ? new Date(v).getTime() : 0);
+        if (p.op === 'start') {
+          if (!String(p.supplier || '').trim()) throw new Error('Укажите поставщика');
+          if (p.where && db.rework.some((x) => !x.finishMs && x.where === p.where)) throw new Error('На «' + p.where + '» уже идёт доработка');
+          db.rework.unshift({ n: db.rework.reduce((m, x) => Math.max(m, x.n), 0) + 1, supplier: p.supplier, where: p.where || '',
+            order: p.order || '', what: p.what || '', qty: p.qty || '', comment: '', who: me.name + ' (телефон)', startMs: ms, finishMs: 0 });
+        } else if (p.op === 'stop') {
+          const x = db.rework.find((y) => y.n === Number(p.n)) || db.rework.find((y) => !y.finishMs && y.where === p.where);
+          if (x && !x.finishMs) x.finishMs = ms;
+        } else if (p.op === 'drop') {
+          db.rework = db.rework.filter((y) => y.n !== Number(p.n));
+        } else {
+          let x = db.rework.find((y) => y.n === Number(p.n));
+          if (!x) { x = { n: db.rework.reduce((m, y) => Math.max(m, y.n), 0) + 1, who: me.name + ' (телефон)' }; db.rework.unshift(x); }
+          if (!String(p.supplier || x.supplier || '').trim()) throw new Error('Укажите поставщика');
+          ['supplier', 'where', 'order', 'what', 'qty', 'comment'].forEach((k) => { if (p[k] !== undefined) x[k] = p[k]; });
+          if (p.start) x.startMs = tms(p.start);
+          if (p.finish) x.finishMs = tms(p.finish); else if (p.min) x.finishMs = x.startMs + Number(p.min) * 60000;
+          if (x.finishMs && x.finishMs < x.startMs) throw new Error('Конец раньше начала');
+        }
         out = view(me); break;
       }
       case 'taskRead': {
