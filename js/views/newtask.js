@@ -163,6 +163,7 @@ export const on = {
     const t = (inp && inp.value || '').trim();
     if (!t) { inp && inp.focus(); return; }
     (draft().items || (draft().items = [])).push(t);
+    inp.value = '';                  /* поле переживает перерисовку — чистим сами */
     store.emit();
     setTimeout(() => document.querySelector('#it-new')?.focus(), 30);
   },
@@ -225,13 +226,18 @@ export const on = {
 
 export function mount(root) {
   const ta = root.querySelector('#nt-text');
-  if (ta) ta.addEventListener('input', () => {
-    const f = draft();
-    f.text = ta.value;
-    applyParse(f, store.data || {});
-    clearTimeout(ta._t);
-    ta._t = setTimeout(() => store.emit(), 120);
-  });
+  /* Поле переживает перерисовки (app.js, «вокруг» поля) — обработчик
+     вешаем один раз, иначе с каждой паузой их становилось бы больше. */
+  if (ta && !ta._wired) {
+    ta._wired = true;
+    ta.addEventListener('input', () => {
+      const f = draft();
+      f.text = ta.value;
+      applyParse(f, store.data || {});
+      clearTimeout(ta._t);
+      ta._t = setTimeout(() => store.emit(), 150);
+    });
+  }
   const it = root.querySelector('#it-new');
   if (it) it.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); on['it-add'](); } };
   const f = draft();

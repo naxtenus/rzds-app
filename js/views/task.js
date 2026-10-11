@@ -162,7 +162,7 @@ export function mount(root, params) {
   const it = root.querySelector('#it-new');
   if (it) it.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector('[data-act="it-plus"]').click(); } };
   const input = root.querySelector('#cmt');
-  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector('[data-act="comment"]').click(); } });
+  if (input) input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector('[data-act="comment"]').click(); } };
 }
 
 const upd = (n, patch, ok) => store.act('taskUpdate', Object.assign({ n }, patch), (d) => {

@@ -300,7 +300,12 @@ export function mount(root) {
     else { const targetH = (store.ui.planDay || 0) === 0 ? (Date.now() - startOfDay(new Date())) / 36e5 : 8; px = (targetH - H0) * HW - sc.clientWidth / 3; }
     sc.scrollLeft = Math.max(0, px);
   }
-  sc.addEventListener('scroll', () => { store.ui.planScroll = sc.scrollLeft; store.ui.planScrollKey = key; }, { passive: true });
+  /* Лента может пережить перерисовку (app.js рисует «вокруг» поля, в
+     котором печатают) — обработчики вешаем на неё один раз. */
+  sc._key = key;
+  if (sc._wired) return;
+  sc._wired = true;
+  sc.addEventListener('scroll', () => { store.ui.planScroll = sc.scrollLeft; store.ui.planScrollKey = sc._key; }, { passive: true });
   if (view === 'day' && store.me && store.me.role === 'owner') dragSupport(sc);
 }
 

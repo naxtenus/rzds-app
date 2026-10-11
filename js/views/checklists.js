@@ -48,6 +48,7 @@ export const on = {
     const t = (inp && inp.value || '').trim();
     if (!t) { inp && inp.focus(); return; }
     store.ui.clDraft.items.push(t);
+    inp.value = '';                  /* поле переживает перерисовку — чистим сами */
     store.emit();
     setTimeout(() => document.querySelector('#cl-new')?.focus(), 30);
   },

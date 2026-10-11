@@ -5,6 +5,7 @@ import { esc, icon, dayTitle, hhmm, ago, sameDay } from '../util.js';
 import { tabbar, opL, refreshBtn, reloadData } from '../ui.js';
 import { store } from '../store.js';
 import { thumbs } from '../photo.js';
+import { reworkSection, on as reworkOn } from './rework.js';
 
 const opByCode = (d, c) => (d.ops || []).find((o) => o.code === c);
 
@@ -151,6 +152,7 @@ export function render() {
       ${stopForm(d)}
       <div class="tiles">${tiles || '<div class="empty">Станки ещё не заведены</div>'}</div>
     </section>
+    ${reworkSection(d)}
     ${mine.length ? `<section style="display:flex;flex-direction:column;gap:8px">
       <div class="row-between"><h2 class="h2">Мои задачи на сегодня</h2><a class="link-btn" href="#/tasks" style="font-size:14px;padding:8px 0">Все</a></div>
       <div class="list">${mine.slice(0, 4).map((t) => `<a class="task" href="#/task/${t.n}" style="text-decoration:none;color:inherit;padding-left:14px">
@@ -212,4 +214,5 @@ export const on = {
   },
   'refresh': () => reloadData(),
   'reload-data': () => reloadData(),
+  ...reworkOn,
 };
