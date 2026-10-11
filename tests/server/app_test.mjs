@@ -748,6 +748,27 @@ check("снимок к проблеме и в переписке по заказ
   eq(post({ a: "photo", s: OWN, id: доб.id }).data === PNG, true, "снимок из плана не открывается в приложении");
   return r.photos.length + 1 + " снимка у заказа " + заказ;
 });
+console.log("\n12. Доработки за поставщиков (11.10): счётчик у владельца");
+check("вид владельца несёт доработки; «начать» и «закончить» с телефона; повтор по cid не заводит вторую", () => {
+  const v0 = post({ a: "load", s: OWN });
+  truthy(v0.rework && Array.isArray(v0.rework.running) && Array.isArray(v0.rework.suppliers), "в виде нет rework: " + JSON.stringify(v0.rework));
+  const v = post({ a: "rework", s: OWN, cid: "rw-1", op: "start", supplier: "ООО Литейщик", where: M, what: "расточка", ms: Date.now() - 30 * 60000 });
+  const x = (v.rework.running || []).find((y) => y.supplier === "ООО Литейщик");
+  truthy(x && x.where === M && x.min >= 29, "идущей нет: " + JSON.stringify(v.rework));
+  const п = post({ a: "rework", s: OWN, cid: "rw-1", op: "start", supplier: "ООО Литейщик", where: M, ms: Date.now() });
+  eq(п.repeat, true, "повтор не опознан");
+  eq((п.rework.running || []).length, 1, "идущих");
+  const w = post({ a: "rework", s: OWN, cid: "rw-2", op: "stop", n: x.n, ms: Date.now() });
+  truthy(!(w.rework.running || []).length && (w.rework.recent || []).some((y) => y.n === x.n && y.min >= 29), "не закончилась: " + JSON.stringify(w.rework));
+  const р = post({ a: "rework", s: OWN, cid: "rw-3", op: "save", n: x.n, qty: "4" });
+  truthy(р.rework.recent.some((y) => y.n === x.n && y.qty === "4"), "правка не легла");
+  return "№" + x.n + ", " + (w.rework.recent.find((y) => y.n === x.n) || {}).min + " мин";
+});
+check("рабочему доработки недоступны и в его виде их нет", () => {
+  const r = post({ a: "rework", s: WRK, op: "start", supplier: "Х" });
+  truthy(/только владелец/.test(r.error || ""), "ответ: " + JSON.stringify(r).slice(0, 200));
+  eq(post({ a: "load", s: WRK }).rework, undefined, "в виде рабочего есть доработки");
+});
 check("прогрев: ping отвечает без входа", () => { eq(post({ a: "ping" }).ok, true, "ping"); });
 
 console.log(`\nИтого: ${ok} прошло, ${bad} упало`);
