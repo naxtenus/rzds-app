@@ -49,7 +49,32 @@ export async function enablePush() {
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(key) });
   }
   await api('pushSubscribe', { sub: sub.toJSON(), ua: navigator.userAgent.slice(0, 160) });
+  try { localStorage.setItem(PKEY, JSON.stringify({ ep: sub.endpoint, at: Date.now() })); } catch (e) {}
   return true;
+}
+
+/* Подписка телефона — серверу, сама, при каждом открытии (раз в сутки или
+   если адрес подписки сменился). 15.10.2026: на сервере лежала подписка от
+   29.09, Apple её принимала, а до телефона не доходило — телефон со временем
+   получает новую подписку, а приложение сообщало её серверу только по кнопке
+   «Включить уведомления», которой после разрешения уже не видно. */
+const PKEY = 'rzds-push-sent';
+export async function syncPush(force) {
+  try {
+    if (!pushSupported() || Notification.permission !== 'granted' || backend().isDemo) return false;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const { key } = await api('pushKey');
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(key) });
+    }
+    let last = null;
+    try { last = JSON.parse(localStorage.getItem(PKEY) || 'null'); } catch (e) {}
+    if (!force && last && last.ep === sub.endpoint && Date.now() - last.at < 864e5) return false;
+    await api('pushSubscribe', { sub: sub.toJSON(), ua: navigator.userAgent.slice(0, 160) });
+    try { localStorage.setItem(PKEY, JSON.stringify({ ep: sub.endpoint, at: Date.now() })); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
 }
 
 export async function testPush() {

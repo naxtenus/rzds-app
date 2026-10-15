@@ -3,7 +3,7 @@
 
 import { store } from './store.js';
 import { session, net } from './api.js';
-import { setBadge } from './push.js';
+import { setBadge, syncPush } from './push.js';
 import { esc } from './util.js';
 import * as ob from './outbox.js';
 import * as today from './views/today.js';
@@ -271,3 +271,6 @@ if ('serviceWorker' in navigator) {
 store.restore();
 render();
 if (session.get()) store.refresh(!!store.data);
+/* Подписку на уведомления — серверу, тихо (раз в сутки или при смене). */
+if (session.get()) setTimeout(() => syncPush(), 4000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && session.get()) syncPush(); });

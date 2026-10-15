@@ -35,7 +35,8 @@ const isOn = (s, k) => (k === 'quiet' ? s[k] === true : s[k] !== false);
 export function pushBlock() {
   const st = pushState();
   if (st === 'granted') return `<div class="info">${icon.check(20)}<span>Уведомления на этом телефоне включены.
-    <button class="link-btn" data-act="push-test" style="padding:0 0 0 4px;font-size:14px;color:inherit;text-decoration:underline">Прислать пробное</button></span></div>`;
+    <button class="link-btn" data-act="push-test" style="padding:0 0 0 4px;font-size:14px;color:inherit;text-decoration:underline">Прислать пробное</button>
+    · <button class="link-btn" data-act="push-on" style="padding:0 0 0 4px;font-size:14px;color:inherit;text-decoration:underline">Переподключить</button></span></div>`;
   if (st === 'need-install') return `<div class="info bronze">${icon.addBox(20)}<span>На айфоне уведомления работают, только если открыть приложение с экрана «Домой».
     <a href="#/install" style="color:inherit">Как добавить</a></span></div>`;
   if (st === 'denied') return `<div class="info red">${icon.alert(20)}<span>Уведомления запрещены. Включите: Настройки телефона → Уведомления → РЗДС.</span></div>`;
@@ -118,7 +119,7 @@ export const on = {
     } catch (e) {}
   },
   'push-on': async () => {
-    try { await enablePush(); store.say('Уведомления включены'); } catch (e) { store.say(e.message, 'error'); }
+    try { await enablePush(); store.say(store.isDemo ? 'Уведомления включены' : 'Уведомления подключены — пришлю пробное'); if (!store.isDemo) await testPush().catch(() => {}); } catch (e) { store.say(e.message, 'error'); }
     store.emit();
   },
   'push-test': async () => {
