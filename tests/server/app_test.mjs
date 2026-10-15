@@ -38,7 +38,7 @@ let pushStatus = 201;
 const origFetch = ctx.UrlFetchApp.fetch;
 ctx.UrlFetchApp.fetch = (url, params) => {
   if (/push\.example/.test(url)) {
-    pushes.push({ url, headers: params.headers, len: params.payload.length });
+    pushes.push({ url, headers: params.headers, len: params.payload.length, tag: ctx.__тег || "" });
     return { getResponseCode: () => pushStatus, getContentText: () => "" };
   }
   return origFetch(url, params);
@@ -48,6 +48,9 @@ ctx.console = { log: () => {}, warn: () => {}, error: console.error, info: () =>
 loadServer(ctx, DIR, ["Код.gs", "Пуск.gs", "WebPush.gs", "App.gs"]);
 const run = (code) => vm.runInContext(code, ctx);
 const j = (code) => JSON.parse(run(`JSON.stringify(${code})`));
+/* Ярлык уведомления — из полезной нагрузки до шифрования (заголовка Topic
+   больше нет: Apple его отклоняет, 15.10.2026). */
+run("var __тег = ''; (function () { var e = WP.encrypt; WP.encrypt = function (sub, t) { try { __тег = JSON.parse(t).tag || ''; } catch (x) { __тег = ''; } return e(sub, t); }; })()");
 const post = (body, app = "1") => {
   ctx.__body = JSON.stringify(body);
   const out = run(`doPost({ parameter: { app: ${JSON.stringify(app)} }, postData: { contents: __body } })`);
@@ -384,7 +387,7 @@ check("перебор кодов упирается в предел — у ка�
 });
 
 console.log("\n7. Волна 1: надёжность");
-const topics = () => pushes.map((p) => (p.url.split("/").pop()) + ":" + (p.headers.Topic || ""));
+const topics = () => pushes.map((p) => (p.url.split("/").pop()) + ":" + (p.tag || ""));
 WRK = post({ a: "login", code: post({ a: "issueCode", s: OWN, name: "Слесарь" }).code, dev: "wrk-new" }).token;   // прежний вход выключен в разделе 6
 const ackKeys = () => Object.keys(j("props_().getProperties()")).filter((k) => k.startsWith("APP_ACK:"));
 check("повтор того же нажатия (cid) не делает дело дважды", () => {
@@ -768,6 +771,28 @@ check("рабочему доработки недоступны и в его в�
   const r = post({ a: "rework", s: WRK, op: "start", supplier: "Х" });
   truthy(/только владелец/.test(r.error || ""), "ответ: " + JSON.stringify(r).slice(0, 200));
   eq(post({ a: "load", s: WRK }).rework, undefined, "в виде рабочего есть доработки");
+});
+check("уведомление уходит без заголовка Topic (Apple: BadWebPushTopic, 15.10.2026)", () => {
+  pushes.length = 0;
+  post({ a: "pushTest", s: OWN });
+  post({ a: "flush", s: OWN });
+  truthy(pushes.length > 0, "push не ушёл");
+  truthy(pushes.every((p) => !("Topic" in p.headers)), "есть Topic: " + JSON.stringify(pushes.map((p) => p.headers.Topic)));
+});
+check("служба уведомлений отказала всем телефонам — тревога в Телеграм, раз в три часа", () => {
+  run("var __ув3 = []; Уведомить_ = function (t, k) { __ув3.push(t); return 'ok'; };");
+  run("props_().deleteProperty('APP_ACKREP:владелец')");
+  pushStatus = 400;
+  run("Прил_пушСейчас_('владелец', { title: 'x', body: 'y', tag: 'task-1' }, null, true)");
+  run("Прил_пушСейчас_('владелец', { title: 'x', body: 'y', tag: 'task-2' }, null, true)");
+  pushStatus = 201;
+  const ув = j("__ув3");
+  eq(ув.length, 1, "сообщений в Телеграм");
+  truthy(/не уходят/.test(ув[0]) && /ошибка 400/.test(ув[0]), ув[0]);
+  const err = j("readTable_(ПРИЛ.ПУШ, COL_ППУШ).map(function (r) { return r['Ошибка']; })").join(" ");
+  truthy(/ошибка 400/.test(err), "ошибка не записана: " + err);
+  run("props_().deleteProperty('APP_ACKREP:владелец')");
+  return ув[0].slice(0, 100) + "…";
 });
 check("прогрев: ping отвечает без входа", () => { eq(post({ a: "ping" }).ok, true, "ping"); });
 

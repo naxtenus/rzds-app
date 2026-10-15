@@ -267,10 +267,11 @@ function ВебПуш_отправить_(sub, p, опции) {
     'TTL': String(опции.ttl || 24 * 3600),
     'Urgency': p.kind === 'problem' ? 'high' : 'normal',
   };
-  /* Topic: новое уведомление с тем же ярлыком заменяет старое в очереди,
-     пока телефон был без связи, — не копим десять «план изменился». */
-  var topic = p.tag ? String(p.tag).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) : '';
-  if (topic) headers['Topic'] = topic;
+  /* Заголовок Topic НЕ ставим (15.10.2026). С конца сентября 2026 Apple
+     отвечает на любое уведомление с Topic ошибкой 400 «BadWebPushTopic» —
+     даже на правильное по RFC 8030, — и уведомления на айфоны перестали
+     доходить совсем. Замену старого уведомления новым с тем же ярлыком и так
+     делает телефон: showNotification({ tag }) в sw.js. */
   var res = UrlFetchApp.fetch(endpoint, {
     method: 'post',
     contentType: 'application/octet-stream',
